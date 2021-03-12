@@ -1,0 +1,8 @@
+name = "jkMST"
+uuid = "ae6f643e-e61b-46c0-ad53-95a7e369c5c0"
+authors = ["Lukas Grassauer <lukas@grassauer.eu>"]
+version = "0.1.0"
+
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+Crayons = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"

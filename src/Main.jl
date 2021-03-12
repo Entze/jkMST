@@ -1,0 +1,3 @@
+import jkMST
+
+jkMST.main()
