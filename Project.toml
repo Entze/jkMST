@@ -6,3 +6,6 @@ version = "0.1.0"
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 Crayons = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
+LightGraphs = "093fc24a-ae57-5d10-9952-331d41423f4d"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+SimpleWeightedGraphs = "47aef6b3-ad0c-573a-a1e2-d07658019622"

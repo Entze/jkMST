@@ -1,9 +1,13 @@
 module jkMST
 
 include("solvingMode.jl")
+include("Util.jl")
 
+using Logging
 using ArgParse
 using Crayons.Box
+using LightGraphs, SimpleWeightedGraphs
+
 function ArgParse.parse_item(::Type{SolvingMode}, x::AbstractString)
     return read(SolvingMode, x)
 end
@@ -22,21 +26,93 @@ function parse_cmdargs()
             help = "Size of the k-MST."
             required = true
             arg_type = Int
-
+        "--verbose", "-v"
+            help = "Increase verbosity."
+            action = :count_invocations
+        "--quiet", "-q"
+            help = "Decrease verbosity."
+            action = :count_invocations
     end
 
     return parse_args(s)
 end
 
+const loglevels = [Logging.Debug, Logging.Info, Logging.Warn, Logging.Error]
+
 function main()
     parsed_args = parse_cmdargs()
-    file = parsed_args["file"]
-    modestring = parsed_args["mode"]
-    mode = solvingmode_from_string(modestring)
-    size = parsed_args["size"]
-    println("Reading file: ", CYAN_FG(file))
-    println("Solving in: ", MAGENTA_FG(string(mode)), " mode")
-    println("Spanning tree-size: ",  GREEN_FG(string(size)))
+    verbosity :: Int = parsed_args["verbose"]
+    quiet :: Int = parsed_args["quiet"]
+    level = loglevels[max(1,min(4,2 + (quiet - verbosity)))]
+    logger = Logging.SimpleLogger(stdout, level)
+    global_logger(logger)
+    file :: String = parsed_args["file"]
+    modestring :: String = parsed_args["mode"]
+    mode :: SolvingMode = solvingmode_from_string(modestring)
+    size :: Int = parsed_args["size"]
+    kMST(file, mode, size)
 end
+
+
+function kMST(path :: String, mode :: SolvingMode, k:: Int)
+    @debug ("Reading file: " * string(CYAN_FG(path)))
+    @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode")
+    @debug ("Spanning tree-size: $(string(GREEN_FG(string(k))))")
+    graph = read_file_as_simplegraph(path)
+end
+
+function read_file_as_simplegraph(path :: String)
+    graph :: Union{Nothing, SimpleWeightedGraph} = nothing
+    vertexsize :: Int = 0
+    edgesize :: Int = 0
+    totaltime, totallines = open(path) do f
+        linecounter :: Int = 0
+        timetaken = @elapsed for line in eachline(f)
+            if linecounter <= 1
+                if linecounter == 0
+                    vertexsize = parse(Int, line)
+                    graph = SimpleWeightedGraph(vertexsize)
+                else
+                    edgesize = parse(Int, line)
+                end
+            else
+                elemsstrings = split(line, " ", limit = 4)
+                elems = [parse(Int, v) for v in elemsstrings]
+                index = elems[1]
+                node1 = elems[2]
+                node2 = elems[3]
+                weight = elems[4]
+                if weight > 0
+                    add_edge!(graph, node1 + 1, node2 + 1, weight)
+                else
+                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/linecounter, 1.0 - (eps() * 2.0)))
+                end
+            end
+            linecounter += 1
+        end
+        (timetaken, linecounter)
+    end
+
+    if totallines != 1
+        linesplural = "s"
+    else
+        linesplural = ""
+    end
+
+    @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds(totaltime, 0)))) at $(string(CYAN_FG(format_seconds(totaltime/totallines, 0)))) per line")
+    es = ne(graph)
+    if es != edgesize
+        @warn "Input file claims $edgesize edges but got $es:" 
+        println(nv(graph))
+        println(es)
+        line = 0
+        for (i, e) in enumerate(edges(graph))
+            println("$line $(src(e) - 1) $(dst(e) - 1) $(Int(trunc(weight(e))))")
+            line += 1
+        end
+    end
+    return graph
+end
+
 
 end
