@@ -28,3 +28,25 @@ function format_seconds(seconds, trail = -1)
 end
 
 
+function print_weighted_graph(graph :: SimpleWeightedGraph, level = nothing, numberofvertices = nv(graph), numberofedges = ne(graph), weights = weights(graph))
+    if level === nothing
+        println(numberofvertices)
+    else
+        @logmsg level numberofvertices
+    end
+    if level === nothing
+        println(numberofedges)
+    else
+        @logmsg level numberofedges
+    end
+    line :: Int = 0
+    for (i, e) in enumerate(edges(graph))
+        msg :: String = "$line $(src(e) - 1) $(dst(e) - 1) $(Int(trunc(weight(e))))"
+        if level === nothing
+            println(msg)
+        else
+            @logmsg level msg
+        end
+        line += 1
+    end
+end

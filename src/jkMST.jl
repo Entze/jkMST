@@ -1,12 +1,16 @@
 module jkMST
 
-include("solvingMode.jl")
-include("Util.jl")
-
 using Logging
 using ArgParse
 using Crayons.Box
 using LightGraphs, SimpleWeightedGraphs
+using JuMP
+using GLPK
+
+include("solvingMode.jl")
+include("Util.jl")
+include("Common.jl")
+include("Mtz.jl")
 
 function ArgParse.parse_item(::Type{SolvingMode}, x::AbstractString)
     return read(SolvingMode, x)
@@ -44,7 +48,7 @@ function main()
     verbosity :: Int = parsed_args["verbose"]
     quiet :: Int = parsed_args["quiet"]
     level = loglevels[max(1,min(4,2 + (quiet - verbosity)))]
-    logger = Logging.SimpleLogger(stdout, level)
+    logger = Logging.ConsoleLogger(stdout, level)
     global_logger(logger)
     file :: String = parsed_args["file"]
     modestring :: String = parsed_args["mode"]
@@ -59,7 +63,17 @@ function kMST(path :: String, mode :: SolvingMode, k:: Int)
     @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode")
     @debug ("Spanning tree-size: $(string(GREEN_FG(string(k))))")
     graph = read_file_as_simplegraph(path)
+    model = Model(GLPK.Optimizer)
+    basic_kmst!(model, graph, k)
+    if mode == mtz
+        miller_tuckin_zemlin!(model, graph, k)
+    end
+    @debug model
+    if mode == mtz || mode == scf || mode == mcf
+        compact_formulation_solution!(model, graph, k)
+    end
 end
+
 
 function read_file_as_simplegraph(path :: String)
     graph :: Union{Nothing, SimpleWeightedGraph} = nothing
@@ -85,7 +99,7 @@ function read_file_as_simplegraph(path :: String)
                 if weight > 0
                     add_edge!(graph, node1 + 1, node2 + 1, weight)
                 else
-                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/linecounter, 1.0 - (eps() * 2.0)))
+                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/edgesize, 1.0 - (eps() * 2.0)))
                 end
             end
             linecounter += 1
@@ -103,13 +117,7 @@ function read_file_as_simplegraph(path :: String)
     es = ne(graph)
     if es != edgesize
         @warn "Input file claims $edgesize edges but got $es:" 
-        println(nv(graph))
-        println(es)
-        line = 0
-        for (i, e) in enumerate(edges(graph))
-            println("$line $(src(e) - 1) $(dst(e) - 1) $(Int(trunc(weight(e))))")
-            line += 1
-        end
+        print_weighted_graph(graph, nothing, nv(graph), es)
     end
     return graph
 end
