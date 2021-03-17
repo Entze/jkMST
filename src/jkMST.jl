@@ -8,9 +8,9 @@ using JuMP
 using GLPK
 
 include("solvingMode.jl")
-include("Util.jl")
-include("Common.jl")
-include("Mtz.jl")
+include("util.jl")
+include("common.jl")
+include("mtz.jl")
 
 function ArgParse.parse_item(::Type{SolvingMode}, x::AbstractString)
     return read(SolvingMode, x)
@@ -44,30 +44,37 @@ end
 const loglevels = [Logging.Debug, Logging.Info, Logging.Warn, Logging.Error]
 
 function main()
-    parsed_args = parse_cmdargs()
-    verbosity :: Int = parsed_args["verbose"]
-    quiet :: Int = parsed_args["quiet"]
-    level = loglevels[max(1,min(4,2 + (quiet - verbosity)))]
-    logger = Logging.ConsoleLogger(stdout, level)
-    global_logger(logger)
-    file :: String = parsed_args["file"]
-    modestring :: String = parsed_args["mode"]
-    mode :: SolvingMode = solvingmode_from_string(modestring)
-    size :: Int = parsed_args["size"]
-    kMST(file, mode, size)
+    setuptime = @elapsed begin
+        parsed_args = parse_cmdargs()
+        verbosity :: Int = parsed_args["verbose"]
+        quiet :: Int = parsed_args["quiet"]
+        level = loglevels[max(1,min(4,2 + (quiet - verbosity)))]
+        logger = Logging.ConsoleLogger(stdout, level)
+        global_logger(logger)
+        file :: String = parsed_args["file"]
+        modestring :: String = parsed_args["mode"]
+        mode :: SolvingMode = solvingmode_from_string(modestring)
+        size :: Int = parsed_args["size"]
+    end
+    alltime = @elapsed kMST(file, mode, size)
+    @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
 end
 
 
 function kMST(path :: String, mode :: SolvingMode, k:: Int)
-    @debug ("Reading file: " * string(CYAN_FG(path)))
-    @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode")
-    @debug ("Spanning tree-size: $(string(GREEN_FG(string(k))))")
+    @debug ("Reading file: $(string(CYAN_FG(path))).")
+    @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
+    @debug ("Spanning tree-size: $(string(GREEN_FG(string(k)))).")
     graph = read_file_as_simplegraph(path)
-    model = Model(GLPK.Optimizer)
-    basic_kmst!(model, graph, k)
-    if mode == mtz
-        miller_tuckin_zemlin!(model, graph, k)
+    @debug "Generating model."
+    modeltime = @elapsed begin
+        model = Model(GLPK.Optimizer)
+        basic_kmst!(model, graph, k)
+        if mode == mtz
+            miller_tuckin_zemlin!(model, graph, k)
+        end
     end
+    @debug "Generated model in $(format_seconds_readable(modeltime)):"
     @debug model
     if mode == mtz || mode == scf || mode == mcf
         compact_formulation_solution!(model, graph, k)
@@ -113,7 +120,7 @@ function read_file_as_simplegraph(path :: String)
         linesplural = ""
     end
 
-    @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds(totaltime, 0)))) at $(string(CYAN_FG(format_seconds(totaltime/totallines, 0)))) per line")
+    @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds_readable(totaltime, 1)))) at $(string(CYAN_FG(format_seconds_readable(totaltime/totallines, 2)))) per line")
     es = ne(graph)
     if es != edgesize
         @warn "Input file claims $edgesize edges but got $es:" 
