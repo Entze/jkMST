@@ -5,16 +5,28 @@ using ArgParse
 using Crayons.Box
 using LightGraphs, SimpleWeightedGraphs
 using JuMP
-using GLPK
+using GLPK, SCIP, CPLEX
+using Requires
 
 include("solvingMode.jl")
 include("util.jl")
 include("common.jl")
 include("mtz.jl")
 
-function ArgParse.parse_item(::Type{SolvingMode}, x::AbstractString)
-    return read(SolvingMode, x)
+@enum Solver glpk scip cplex
+
+function solver_from_string(x::AbstractString)
+    i::Int = -1
+    xl = lowercase(x)
+    for solver in instances(Solver)
+        if string(solver) == xl
+            i = Int(solver)
+            break
+        end
+    end
+    return Solver(i)
 end
+
 
 function parse_cmdargs()
     s = ArgParseSettings()
@@ -24,7 +36,7 @@ function parse_cmdargs()
             help = "A graph represented as file."
             required = true
         "--mode", "-m"
-            help = "The solving method. (Allowed values: " * string([string(v) for v in instances(SolvingMode)]) * ")"
+            help = "The solving method. (Allowed values: $(string([string(v) for v in instances(SolvingMode)])))"
             default = "mtz"
         "--size", "-k"
             help = "Size of the k-MST."
@@ -33,6 +45,9 @@ function parse_cmdargs()
         "--verbose", "-v"
             help = "Increase verbosity."
             action = :count_invocations
+        "--solver", "-s"
+            help = "Choose solver. (Allowed values: $(string([string(v) for v in instances(Solver)]))"
+            default = "scip"
         "--quiet", "-q"
             help = "Decrease verbosity."
             action = :count_invocations
@@ -55,20 +70,31 @@ function main()
         modestring :: String = parsed_args["mode"]
         mode :: SolvingMode = solvingmode_from_string(modestring)
         size :: Int = parsed_args["size"]
+        solverstring :: String = parsed_args["solver"]
+        solver :: Solver = solver_from_string(solverstring)
     end
-    alltime = @elapsed kMST(file, mode, size)
+    alltime = @elapsed kMST(file, mode, size, solver)
     @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
 end
 
 
-function kMST(path :: String, mode :: SolvingMode, k:: Int)
+function kMST(path :: String, mode :: SolvingMode, k:: Int, solver :: Solver)
+    @debug ("Solving with: $(string(YELLOW_FG(uppercase(string(solver))))).")
     @debug ("Reading file: $(string(CYAN_FG(path))).")
     @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
     @debug ("Spanning tree-size: $(string(GREEN_FG(string(k)))).")
     graph = read_file_as_simplegraph(path)
     @debug "Generating model."
+    model = Model()
     modeltime = @elapsed begin
-        model = Model(GLPK.Optimizer)
+        if solver == glpk
+            optimizer = GLPK.Optimizer
+        elseif solver == cplex
+            optimizer = CPLEX.Optimizer
+        else
+            optimizer = SCIP.Optimizer
+        end
+        set_optimizer(model, optimizer)
         basic_kmst!(model, graph, k)
         if mode == mtz
             miller_tuckin_zemlin!(model, graph, k)
@@ -85,7 +111,7 @@ end
 function read_file_as_simplegraph(path :: String)
     graph :: Union{Nothing, SimpleWeightedGraph} = nothing
     vertexsize :: Int = 0
-    edgesize :: Int = 0
+    edgesize :: Union{AbstractFloat, Int} = Inf
     totaltime, totallines = open(path) do f
         linecounter :: Int = 0
         timetaken = @elapsed for line in eachline(f)
@@ -106,10 +132,13 @@ function read_file_as_simplegraph(path :: String)
                 if weight > 0
                     add_edge!(graph, node1 + 1, node2 + 1, weight)
                 else
-                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/edgesize, 1.0 - (eps() * 2.0)))
+                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/edgesize, 0.5 - (eps() * 2.0)))
                 end
             end
             linecounter += 1
+            if linecounter >= (edgesize + 2)
+                break
+            end
         end
         (timetaken, linecounter)
     end
