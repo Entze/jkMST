@@ -2,26 +2,29 @@
 using DataStructures
 using LightGraphs, SimpleWeightedGraphs
 
-function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int, startnode :: Union{Nothing, Int} = nothing)
+function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Union{Nothing, Int} = nothing, upperbound = typemax(Int))
+    nvg = nv(graph)
     es = edges(graph)
     es = collect(SimpleWeightedEdge, es)
     sort!(es, by=weight)
     k -= 1
     if isnothing(startnode)
         candidateedges = []
-        candidatenodes = []
+        candidatenodes = Dict{Int, Int}()
         for e in es
             i = src(e)
             j = dst(e)
             if i > 1 && j > 1
                 if isempty(candidateedges)
                     push!(candidateedges, e)
+                    push!(candidatenodes, i => 0)
+                    push!(candidatenodes, j => 0)
                 else
                     w = weight(e)
                     wh = weight(candidateedges[1])
                     if w < wh
                         candidateedges = [e]
-                        candidatenodes = Dict(i => 0, j => 0)
+                        candidatenodes = Dict{Int,Int}(i => 0, j => 0)
                     elseif w == wh
                         push!(candidateedges, e)
                         push!(candidatenodes, i => 0)
@@ -37,17 +40,19 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int, startnode :: Uni
             ks = keys(candidatenodes)
             if i in ks || j in ks
                 if i in ks
-                    candidatenodes[i] += Int(round(weight(e)))
+                    candidatenodes[i] = get(candidatenodes, i, 0) + Int(round(weight(e)))
                 end
                 if j in ks
-                    candidatenodes[j] += Int(round(weight(e)))
+                    candidatenodes[j] = get(candidatenodes, j, 0) + Int(round(weight(e)))
                 end
             end
         end
-        (startnode, neighbouredgeweights) = findmin(candidatenodes)
+        (_, startnode) = findmin(candidatenodes)
     end
     @assert !isnothing(startnode) "No startnode"
-    nvg = nv(graph)
+    @assert startnode != 1 "Startnode is 1"
+    @assert 1 <= startnode && startnode <= nvg "Startnode $startnode is out of bounds (1, $nvg)"
+    @debug "Searching a kMST with Prim's algorithm using $startnode as startnode."
     finished = Set([startnode])
     parents = zeros(Int, nvg)
     distmx = Int.(round.(weights(graph)))
@@ -55,7 +60,7 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int, startnode :: Uni
     treesize = 0
     treeweight = 0
 
-    while treesize < k
+    while treesize < k && treeweight < upperbound && !isempty(es)
         del = 0
         for e in es
             del += 1
@@ -75,6 +80,10 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int, startnode :: Uni
             break
         end
         deleteat!(es, del)
+    end
+    
+    if treeweight > upperbound
+        return nothing
     end
 
     kmst = [SimpleWeightedEdge(parents[v], v, distmx[parents[v], v]) for v in vertices(graph) if parents[v] != 0]

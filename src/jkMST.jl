@@ -8,9 +8,10 @@ using JuMP
 using GLPK, SCIP, CPLEX
 using Requires
 
+include("common.jl")
+include("heuristic.jl")
 include("solvingMode.jl")
 include("util.jl")
-include("common.jl")
 include("mtz.jl")
 
 @enum Solver glpk scip cplex
