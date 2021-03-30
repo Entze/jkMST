@@ -6,7 +6,7 @@ using Crayons.Box
 using LightGraphs, SimpleWeightedGraphs
 using JuMP
 using GLPK, SCIP, CPLEX
-using Requires
+using Random
 
 include("common.jl")
 include("heuristic.jl")
@@ -85,6 +85,55 @@ function kMST(path :: String, mode :: SolvingMode, k:: Int, solver :: Solver)
     @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
     @debug ("Spanning tree-size: $(string(GREEN_FG(string(k)))).")
     graph = read_file_as_simplegraph(path)
+    pre = presolve(graph, k)
+    model = generate_model(graph, mode, k, solver)
+    warmstart_model!(model, graph, mode, k, pre)
+    if mode == mtz || mode == scf || mode == mcf
+        compact_formulation_solution!(model, graph, k)
+    end
+end
+
+function presolve(graph :: SimpleWeightedGraph, k :: Int)
+    @debug "Presolving instance."
+    totaltime = @elapsed begin
+        nvg = nv(graph)
+        candidates = collect(Int, 2:nvg)
+        shuffle!(candidates)
+        bestweight = typemax(Int)
+        best = nothing
+        searchtime = 0
+        optimal :: Bool = true
+        for c in candidates
+            searchtime += @elapsed begin
+                res = prim_heuristic(graph, k, startnode = c, upperbound = bestweight)
+            end
+
+            if !isnothing(res)
+                (a, w) = res
+                if w < bestweight
+                    best = a
+                    bestweight = w
+                end
+            end
+            if searchtime > 10.0
+                optimal = false
+                break;
+            end
+        end
+    end
+    debugstring = "Presolved instance in $(format_seconds_readable(totaltime)) with weight $(bestweight)."
+
+    if optimal
+        debugstring *= " Solution is $(string(GREEN_FG("optimal")))."
+    else
+        debugstring *= " Solution is $(string(RED_FG("suboptimal")))."
+    end
+
+    @debug debugstring
+    return best
+end
+
+function generate_model(graph :: SimpleWeightedGraph, mode :: SolvingMode, k :: Int, solver :: Solver)
     @debug "Generating model."
     model = Model()
     modeltime = @elapsed begin
@@ -103,11 +152,14 @@ function kMST(path :: String, mode :: SolvingMode, k:: Int, solver :: Solver)
     end
     @debug "Generated model in $(format_seconds_readable(modeltime)):"
     @debug model
-    if mode == mtz || mode == scf || mode == mcf
-        compact_formulation_solution!(model, graph, k)
-    end
+    return model
 end
 
+function warmstart_model!(model, graph :: SimpleWeightedGraph, mode :: SolvingMode, k :: Int, solution)
+    if mode == mtz
+        mtz_start_values_from_heuristic!(model, graph, k, solution)
+    end
+end
 
 function read_file_as_simplegraph(path :: String)
     graph :: Union{Nothing, SimpleWeightedGraph} = nothing

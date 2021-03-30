@@ -52,41 +52,45 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Uni
     @assert !isnothing(startnode) "No startnode"
     @assert startnode != 1 "Startnode is 1"
     @assert 1 <= startnode && startnode <= nvg "Startnode $startnode is out of bounds (1, $nvg)"
-    @debug "Searching a kMST with Prim's algorithm using $startnode as startnode."
-    finished = Set([startnode])
-    parents = zeros(Int, nvg)
-    distmx = Int.(round.(weights(graph)))
+    time = @elapsed begin
+        finished :: Set{Int} = Set([startnode])
+        parents :: Vector{Int} = zeros(Int, nvg)
 
-    treesize = 0
-    treeweight = 0
+        treesize :: Int = 0
+        treeweight :: Int = 0
 
-    while treesize < k && treeweight < upperbound && !isempty(es)
-        del = 0
-        for e in es
-            del += 1
-            u = src(e)
-            v = dst(e)
-            ((u == 1 || v == 1) || (u in finished && v in finished) || !(u in finished || v in finished)) && continue
-            w = Int(round(weight(e)))
-            if u in finished
-                push!(finished, v)
-                parents[v] = u
-            else
-                push!(finished, u)
-                parents[u] = v
+        while treesize < k && treeweight < upperbound && !isempty(es)
+            del = 0
+            for e in es
+                del += 1
+                u = src(e)
+                v = dst(e)
+                ((u == 1 || v == 1) || (u in finished && v in finished) || !(u in finished || v in finished)) && continue
+                w = Int(round(weight(e)))
+                if u in finished
+                    push!(finished, v)
+                    parents[v] = u
+                else
+                    push!(finished, u)
+                    parents[u] = v
+                end
+                treeweight += w
+                treesize += 1
+                break
             end
-            treeweight += w
-            treesize += 1
-            break
+            deleteat!(es, del)
         end
-        deleteat!(es, del)
+        
     end
-    
+
     if treeweight > upperbound
+        @debug "Prim $startnode: >$upperbound after $treesize nodes in $(format_seconds_readable(time))."
         return nothing
     end
 
-    kmst = [SimpleWeightedEdge(parents[v], v, distmx[parents[v], v]) for v in vertices(graph) if parents[v] != 0]
+    kmst :: Vector{Edge{Int}} = [Edge{Int}(parents[v], v) for v in vertices(graph) if parents[v] != 0]
+
+    @debug "Prim $startnode: $treeweight, in $(format_seconds_readable(time))."
 
     return (kmst,treeweight)
 
