@@ -7,17 +7,26 @@ function value_rounded(v)
     return Int(round(value(v)))
 end
 
-function basic_kmst!(model, graph :: SimpleWeightedGraph, k :: Int)
+function basic_kmst!(model,
+        graph :: SimpleWeightedGraph,
+        k :: Int,
+        lowerbound=sum(Int(round(weight(e))) for e in Iterators.take(sort(collect(edges(graph)), by=weight), k)),
+        upperbound=sum(Int(round(weight(e))) for e in Iterators.take(sort(collect(edges(graph)), by=weight, rev=true), k)))
     n :: Int = nv(graph)
-    @variable(model,
-        x[i=1:n, j=1:n; has_edge(graph, i, j)], binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
+    @variables(model,begin
+        x[i=1:n, j=1:n; has_edge(graph, i, j)], (binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
+        o, (integer=true, lower_bound=lowerbound, upper_bound = upperbound)
+    end)
 
-    # there are k-1 edges in a tree of size k
-    @constraint(model, sum(x[i, j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1)
     es = edges(graph)
     rawdistances = weights(graph)
-    distances = round.(Int, rawdistances)
-    @objective(model, Min, sum(sum(distances[i,j] * x[i,j] for j = 1:n if has_edge(graph,i,j)) for i = 1:n))
+    distances = Int.(round.(Int, rawdistances))
+    # there are k-1 edges in a tree of size k
+    @constraints(model, begin
+        sum(x[i, j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1
+        sum(sum(distances[i,j] * x[i,j] for j = 1:n if has_edge(graph,i,j)) for i = 1:n) == o
+    end)
+    @objective(model, Min, o)
 
 end
 
