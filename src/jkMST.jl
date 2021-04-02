@@ -109,29 +109,29 @@ function presolve(graph::SimpleWeightedGraph, k::Int)
     @debug "Presolving instance."
     totaltime = @elapsed begin
         n = nv(graph)
-        candidates :: Vector{Int} = collect(Int, 2:n)
+        candidates::Vector{Int} = collect(Int, 2:n)
         shuffle!(candidates)
         bestweight = typemax(Int)
         best = nothing
         searchtime = 0
         optimal::Bool = true
         for c in candidates
-            searchtime += @elapsed begin
+        searchtime += @elapsed begin
             res = prim_heuristic(graph, k, startnode=c, upperbound=bestweight)
             if !isnothing(res)
-                (a,w) = res
-                if w < bestweight
-                    best = a
-                    bestweight = w
-                end
-            end
-            end
-        
-            if searchtime > 9.98
-                optimal = false
-                break;
+            (a, w) = res
+            if w < bestweight
+                best = a
+                bestweight = w
             end
         end
+            end
+        
+        if searchtime > 9.98
+            optimal = false
+            break;
+        end
+    end
     end
     debugstring = "Presolved instance in $(format_seconds_readable(totaltime)) with weight $(bestweight)."
 
@@ -156,17 +156,17 @@ function generate_model(graph::SimpleWeightedGraph,
     modeltime = @elapsed begin
         if solver == glpk
         optimizer = GLPK.Optimizer
-        elseif solver == cplex
+    elseif solver == cplex
             optimizer = CPLEX.Optimizer
         else
             optimizer = SCIP.Optimizer
-        end
+    end
         set_optimizer(model, optimizer)
 
         basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
         if mode == mtz
-            miller_tuckin_zemlin!(model, graph, k)
-        end
+        miller_tuckin_zemlin!(model, graph, k)
+    end
     end
     @debug "Generated model in $(format_seconds_readable(modeltime)):"
     @debug model

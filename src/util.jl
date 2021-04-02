@@ -36,7 +36,7 @@ function format_seconds_readable(seconds, digits=2)
     return string(seconds)
 end
 
-function print_weighted_graph(graph :: SimpleWeightedGraph, level = nothing, numberofvertices = nv(graph), numberofedges = ne(graph))
+function print_weighted_graph(graph::SimpleWeightedGraph, level=nothing, numberofvertices=nv(graph), numberofedges=ne(graph))
     if level === nothing
         println(numberofvertices)
     else
@@ -47,9 +47,9 @@ function print_weighted_graph(graph :: SimpleWeightedGraph, level = nothing, num
     else
         @logmsg level numberofedges
     end
-    line :: Int = 0
+    line::Int = 0
     for (i, e) in enumerate(edges(graph))
-        msg :: String = "$line $(src(e) - 1) $(dst(e) - 1) $(Int(round(weight(e))))"
+        msg::String = "$line $(src(e) - 1) $(dst(e) - 1) $(Int(round(weight(e))))"
         if level === nothing
             println(msg)
         else
@@ -59,7 +59,7 @@ function print_weighted_graph(graph :: SimpleWeightedGraph, level = nothing, num
     end
 end
 
-function print_graph(graph :: AbstractGraph, level = nothing, weight = nothing, numberofvertices = nv(graph), numberofedges = ne(graph))
+function print_graph(graph::AbstractGraph, level=nothing, weight=nothing, numberofvertices=nv(graph), numberofedges=ne(graph))
     if level === nothing
         println(numberofvertices)
     else
@@ -77,9 +77,9 @@ function print_graph(graph :: AbstractGraph, level = nothing, weight = nothing, 
             @logmsg level weight
         end
     end
-    line :: Int = 0
+    line::Int = 0
     for (i, e) in enumerate(edges(graph))
-        msg :: String = "$line $(src(e) - 1) $(dst(e) - 1)"
+        msg::String = "$line $(src(e) - 1) $(dst(e) - 1)"
         if level === nothing
             println(msg)
         else

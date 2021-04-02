@@ -2,10 +2,10 @@
 using DataStructures
 using LightGraphs, SimpleWeightedGraphs
 
-function prim_heuristic(graph :: SimpleWeightedGraph,
-    k :: Int;
-    startnode :: Union{Nothing, Int} = nothing,
-    upperbound = typemax(Int))
+function prim_heuristic(graph::SimpleWeightedGraph,
+    k::Int;
+    startnode::Union{Nothing,Int}=nothing,
+    upperbound=typemax(Int))
     n = nv(graph)
     es = edges(graph)
     es = collect(SimpleWeightedEdge, es)
@@ -13,7 +13,7 @@ function prim_heuristic(graph :: SimpleWeightedGraph,
     k -= 1
     if isnothing(startnode)
         candidateedges = []
-        candidatenodes = Dict{Int, Int}()
+        candidatenodes = Dict{Int,Int}()
         for e in es
             i = src(e)
             j = dst(e)
@@ -56,37 +56,37 @@ function prim_heuristic(graph :: SimpleWeightedGraph,
     @assert startnode != 1 "Startnode is 1"
     @assert 1 <= startnode && startnode <= n "Startnode $startnode is out of bounds (1, $n)"
     time = @elapsed begin
-        finished :: Vector{Bool} = zeros(Bool, n)
+        finished::Vector{Bool} = zeros(Bool, n)
         finished[startnode] = true
-        parents :: Vector{Int} = zeros(Int, n)
+        parents::Vector{Int} = zeros(Int, n)
 
-        treesize :: Int = 0
-        treeweight :: Int = 0
-        lastnode :: Int = -1
+        treesize::Int = 0
+        treeweight::Int = 0
+        lastnode::Int = -1
 
         while treesize < k && treeweight < upperbound && !isempty(es)
-            del = 0
-            for e in es
-                del += 1
-                u = src(e)
-                v = dst(e)
-                ((u == 1 || v == 1) || finished[u] == finished[v]) && continue
-                w = Int(round(weight(e)))
-                if finished[u]
-                    finished[v] = true
-                    parents[v] = u
-                    lastnode = u
-                else
-                    finished[u] = true
-                    parents[u] = v
-                    lastnode = v
-                end
-                treeweight += w
-                treesize += 1
-                break
+        del = 0
+        for e in es
+            del += 1
+            u = src(e)
+            v = dst(e)
+            ((u == 1 || v == 1) || finished[u] == finished[v]) && continue
+            w = Int(round(weight(e)))
+            if finished[u]
+                finished[v] = true
+                parents[v] = u
+                lastnode = u
+            else
+                finished[u] = true
+                parents[u] = v
+                lastnode = v
             end
-            deleteat!(es, del)
+            treeweight += w
+            treesize += 1
+            break
         end
+        deleteat!(es, del)
+    end
     end
 
     if treeweight > upperbound
@@ -94,10 +94,10 @@ function prim_heuristic(graph :: SimpleWeightedGraph,
         return nothing
     end
 
-    kmst :: Vector{Edge{Int}} = [Edge{Int}(parents[v], v) for v in vertices(graph) if parents[v] != 0]
+    kmst::Vector{Edge{Int}} = [Edge{Int}(parents[v], v) for v in vertices(graph) if parents[v] != 0]
 
     @debug "Prim $startnode: $treeweight, in $(format_seconds_readable(time))."
 
-    return (kmst,treeweight)
+    return (kmst, treeweight)
 
 end
