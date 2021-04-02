@@ -2,6 +2,7 @@
 using Logging
 using JuMP
 using LightGraphs, SimpleWeightedGraphs
+using Crayons.Box
 
 function value_rounded(v)
     return Int(round(value(v)))
@@ -9,21 +10,26 @@ end
 
 function basic_kmst!(model,
         graph :: SimpleWeightedGraph,
-        k :: Int,
-        lowerbound=sum(Int(round(weight(e))) for e in Iterators.take(sort(collect(edges(graph)), by=weight), k)),
-        upperbound=sum(Int(round(weight(e))) for e in Iterators.take(sort(collect(edges(graph)), by=weight, rev=true), k)))
+        k :: Int;
+        lowerbound :: Int = typemin(Int),
+        upperbound :: Int = typemax(Int))
     n :: Int = nv(graph)
+    es = collect(SimpleWeightedEdge, edges(graph))
+    sort!(es, by=weight)
+
+    lb = max(sum(Int(round(weight(e))) for e in Iterators.take(Iterators.drop(es, n-1), k-1)), lowerbound)
+    ub = min(sum(Int(round(weight(e))) for e in Iterators.drop(es, n-(k-1))), upperbound)
+    @debug "Objective has $(string(CYAN_FG(string(lb)))) as natural lowerbound."
+    @debug "Objective has $(string(MAGENTA_FG(string(ub)))) as natural upperbound."
     @variables(model,begin
         x[i=1:n, j=1:n; has_edge(graph, i, j)], (binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
-        o, (integer=true, lower_bound=lowerbound, upper_bound = upperbound)
+        o, (integer=true, lower_bound=lb, upper_bound = ub)
     end)
 
-    es = edges(graph)
     rawdistances = weights(graph)
-    distances = Int.(round.(Int, rawdistances))
-    # there are k-1 edges in a tree of size k
+    distances = round.(Int, rawdistances)
     @constraints(model, begin
-        sum(x[i, j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1
+        sum(x[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # there are k-1 edges in a tree of size k
         sum(sum(distances[i,j] * x[i,j] for j = 1:n if has_edge(graph,i,j)) for i = 1:n) == o
     end)
     @objective(model, Min, o)
@@ -42,23 +48,19 @@ function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k ::
     n :: Int = nv(graph)
     solution_graph :: SimpleWeightedGraph= get_solution_graph(model, graph)
     components = connected_components(solution_graph)
-    bug :: Bool = false
     if ne(solution_graph) != k-1
         @error "Solution has wrong number of edges."
         @debug "Should have $(k - 1) edges but has $(ne(solution_graph))."
-        bug = true
     end
     if n - k + 1 != length(components)
         @error "Solution has wrong number of components."
         @debug "Should have $(n - k + 1) components but has $(length(components))."
-        bug = true
     end
     for component in components
         cl = length(component)
         if cl != 1 && cl != k
             @error "Solution is not connected." maxlog=1
             @debug "Should only have components with size 1 or $k but found with size $cl: $(component)."
-            bug = true
         end
     end
     ov = objective_value(model)
@@ -69,38 +71,6 @@ function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k ::
     w_ = Int(trunc(w))
     if w_ != ov_
         @warn "MILP solver claims objective value is $(ov_), however got $(w_)."
-        bug = true
-    end
-    if bug
-        x = [variable_by_name(model, "x[$i,$j]") for i=1:n, j=1:n if has_edge(graph, i, j)]
-        xr = map(value_rounded, x)
-
-        u = [variable_by_name(model, "u[$i]") for i=1:n]
-        ur = map(value_rounded, u)
-
-        d = [variable_by_name(model, "d[$i]") for i=2:n]
-        dr = map(value_rounded, d)
-
-        y = [variable_by_name(model, "y[$i]") for i=2:n]
-        yr = map(value_rounded, y)
-
-        
-        println("x")
-        println(join(map(value, x), " "))
-        println(join(xr, " "))
-
-        println("u")
-        println(join(map(value, u), " "))
-        println(join(ur, " "))
-
-        println("d")
-        println(join(map(value, d), " "))
-        println(join(dr, " "))
-
-        println("y")
-        println(join(map(value, y), " "))
-        println(join(yr, " "))
-
     end
 end
 

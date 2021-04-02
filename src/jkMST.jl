@@ -74,60 +74,60 @@ const loglevels = [Logging.Debug, Logging.Info, Logging.Warn, Logging.Error]
 function main()
     setuptime = @elapsed begin
         parsed_args = parse_cmdargs()
-        verbosity :: Int = parsed_args["verbose"]
-        quiet :: Int = parsed_args["quiet"]
-        level = loglevels[max(1,min(4,2 + (quiet - verbosity)))]
+        verbosity::Int = parsed_args["verbose"]
+        quiet::Int = parsed_args["quiet"]
+        level = loglevels[max(1, min(4, 2 + (quiet - verbosity)))]
         logger = Logging.ConsoleLogger(stdout, level)
         global_logger(logger)
-        file :: String = parsed_args["file"]
-        modestring :: String = parsed_args["mode"]
-        mode :: SolvingMode = solvingmode_from_string(modestring)
-        size :: Int = parsed_args["size"]
-        solverstring :: String = parsed_args["solver"]
-        solver :: Solver = solver_from_string(solverstring)
+        file::String = parsed_args["file"]
+        modestring::String = parsed_args["mode"]
+        mode::SolvingMode = solvingmode_from_string(modestring)
+        size::Int = parsed_args["size"]
+        solverstring::String = parsed_args["solver"]
+        solver::Solver = solver_from_string(solverstring)
     end
     alltime = @elapsed kMST(file, mode, size, solver)
     @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
 end
 
 
-function kMST(path :: String, mode :: SolvingMode, k:: Int, solver :: Solver)
+function kMST(path::String, mode::SolvingMode, k::Int, solver::Solver)
     @debug ("Solving with: $(string(YELLOW_FG(uppercase(string(solver))))).")
     @debug ("Reading file: $(string(CYAN_FG(path))).")
     @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
     @debug ("Spanning tree-size: $(string(GREEN_FG(string(k)))).")
     graph = read_file_as_simplegraph(path)
-    pre = presolve(graph, k)
-    model = generate_model(graph, mode, k, solver)
+    (pre, ub) = presolve(graph, k)
+    model = generate_model(graph, mode, k, solver, upperbound=ub)
     warmstart_model!(model, graph, mode, k, pre)
     if mode == mtz || mode == scf || mode == mcf
         compact_formulation_solution!(model, graph, k)
     end
 end
 
-function presolve(graph :: SimpleWeightedGraph, k :: Int)
+function presolve(graph::SimpleWeightedGraph, k::Int)
     @debug "Presolving instance."
     totaltime = @elapsed begin
-        nvg = nv(graph)
-        candidates = collect(Int, 2:nvg)
+        n = nv(graph)
+        candidates :: Vector{Int} = collect(Int, 2:n)
         shuffle!(candidates)
         bestweight = typemax(Int)
         best = nothing
         searchtime = 0
-        optimal :: Bool = true
+        optimal::Bool = true
         for c in candidates
             searchtime += @elapsed begin
-                res = prim_heuristic(graph, k, startnode = c, upperbound = bestweight)
-            end
-
+            res = prim_heuristic(graph, k, startnode=c, upperbound=bestweight)
             if !isnothing(res)
-                (a, w) = res
+                (a,w) = res
                 if w < bestweight
                     best = a
                     bestweight = w
                 end
             end
-            if searchtime > 10.0
+            end
+        
+            if searchtime > 9.98
                 optimal = false
                 break;
             end
@@ -142,22 +142,28 @@ function presolve(graph :: SimpleWeightedGraph, k :: Int)
     end
 
     @debug debugstring
-    return best
+    return (best, bestweight)
 end
 
-function generate_model(graph :: SimpleWeightedGraph, mode :: SolvingMode, k :: Int, solver :: Solver)
+function generate_model(graph::SimpleWeightedGraph,
+        mode::SolvingMode,
+        k::Int,
+        solver::Solver;
+        lowerbound=typemin(Int),
+        upperbound=typemax(Int))
     @debug "Generating model."
     model = Model()
     modeltime = @elapsed begin
         if solver == glpk
-            optimizer = GLPK.Optimizer
+        optimizer = GLPK.Optimizer
         elseif solver == cplex
             optimizer = CPLEX.Optimizer
         else
             optimizer = SCIP.Optimizer
         end
         set_optimizer(model, optimizer)
-        basic_kmst!(model, graph, k)
+
+        basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
         if mode == mtz
             miller_tuckin_zemlin!(model, graph, k)
         end
@@ -167,18 +173,18 @@ function generate_model(graph :: SimpleWeightedGraph, mode :: SolvingMode, k :: 
     return model
 end
 
-function warmstart_model!(model, graph :: SimpleWeightedGraph, mode :: SolvingMode, k :: Int, solution)
+function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, k::Int, solution)
     if mode == mtz
         mtz_start_values_from_heuristic!(model, graph, k, solution)
     end
 end
 
-function read_file_as_simplegraph(path :: String)
-    graph :: Union{Nothing, SimpleWeightedGraph} = nothing
-    vertexsize :: Int = 0
-    edgesize :: Union{AbstractFloat, Int} = Inf
+function read_file_as_simplegraph(path::String)
+    graph::Union{Nothing,SimpleWeightedGraph} = nothing
+    vertexsize::Int = 0
+    edgesize::Union{AbstractFloat,Int} = Inf
     totaltime, totallines = open(path) do f
-        linecounter :: Int = 0
+        linecounter::Int = 0
         timetaken = @elapsed for line in eachline(f)
             if linecounter <= 1
                 if linecounter == 0
@@ -188,7 +194,7 @@ function read_file_as_simplegraph(path :: String)
                     edgesize = parse(Int, line)
                 end
             else
-                elemsstrings = split(line, " ", limit = 4)
+                elemsstrings = split(line, " ", limit=4)
                 elems = [parse(Int, v) for v in elemsstrings]
                 index = elems[1]
                 node1 = elems[2]
@@ -197,7 +203,7 @@ function read_file_as_simplegraph(path :: String)
                 if weight > 0
                     add_edge!(graph, node1 + 1, node2 + 1, weight)
                 else
-                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0/edgesize, 0.5 - (eps() * 2.0)))
+                    add_edge!(graph, node1 + 1, node2 + 1, min(1.0 / edgesize, 0.5 - (eps() * 2.0)))
                 end
             end
             linecounter += 1
@@ -214,7 +220,7 @@ function read_file_as_simplegraph(path :: String)
         linesplural = ""
     end
 
-    @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds_readable(totaltime, 1)))) at $(string(CYAN_FG(format_seconds_readable(totaltime/totallines, 2)))) per line")
+    @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds_readable(totaltime, 1)))) at $(string(CYAN_FG(format_seconds_readable(totaltime / totallines, 2)))) per line")
     es = ne(graph)
     if es != edgesize
         @warn "Input file claims $edgesize edges but got $es:" 

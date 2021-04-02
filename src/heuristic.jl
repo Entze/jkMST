@@ -2,8 +2,11 @@
 using DataStructures
 using LightGraphs, SimpleWeightedGraphs
 
-function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Union{Nothing, Int} = nothing, upperbound = typemax(Int))
-    nvg = nv(graph)
+function prim_heuristic(graph :: SimpleWeightedGraph,
+    k :: Int;
+    startnode :: Union{Nothing, Int} = nothing,
+    upperbound = typemax(Int))
+    n = nv(graph)
     es = edges(graph)
     es = collect(SimpleWeightedEdge, es)
     sort!(es, by=weight)
@@ -51,13 +54,15 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Uni
     end
     @assert !isnothing(startnode) "No startnode"
     @assert startnode != 1 "Startnode is 1"
-    @assert 1 <= startnode && startnode <= nvg "Startnode $startnode is out of bounds (1, $nvg)"
+    @assert 1 <= startnode && startnode <= n "Startnode $startnode is out of bounds (1, $n)"
     time = @elapsed begin
-        finished :: Set{Int} = Set([startnode])
-        parents :: Vector{Int} = zeros(Int, nvg)
+        finished :: Vector{Bool} = zeros(Bool, n)
+        finished[startnode] = true
+        parents :: Vector{Int} = zeros(Int, n)
 
         treesize :: Int = 0
         treeweight :: Int = 0
+        lastnode :: Int = -1
 
         while treesize < k && treeweight < upperbound && !isempty(es)
             del = 0
@@ -65,14 +70,16 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Uni
                 del += 1
                 u = src(e)
                 v = dst(e)
-                ((u == 1 || v == 1) || (u in finished && v in finished) || !(u in finished || v in finished)) && continue
+                ((u == 1 || v == 1) || finished[u] == finished[v]) && continue
                 w = Int(round(weight(e)))
-                if u in finished
-                    push!(finished, v)
+                if finished[u]
+                    finished[v] = true
                     parents[v] = u
+                    lastnode = u
                 else
-                    push!(finished, u)
+                    finished[u] = true
                     parents[u] = v
+                    lastnode = v
                 end
                 treeweight += w
                 treesize += 1
@@ -80,7 +87,6 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Uni
             end
             deleteat!(es, del)
         end
-        
     end
 
     if treeweight > upperbound
@@ -95,5 +101,3 @@ function prim_heuristic(graph :: SimpleWeightedGraph, k :: Int; startnode :: Uni
     return (kmst,treeweight)
 
 end
-
-
