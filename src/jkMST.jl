@@ -142,6 +142,8 @@ function presolve(graph::SimpleWeightedGraph, k::Int)
     end
 
     @debug debugstring
+    sort!(best, by=dst)
+    sort!(best, by=src, alg=MergeSort)
     return (best, bestweight)
 end
 
@@ -174,9 +176,14 @@ function generate_model(graph::SimpleWeightedGraph,
 end
 
 function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, k::Int, solution)
-    if mode == mtz
-        mtz_start_values_from_heuristic!(model, graph, k, solution)
+    @debug "Warmstart:"
+    totaltime = @elapsed begin
+        basic_kmst_warmstart!(model, graph, k, solution)
+        if mode == mtz
+            miller_tuckin_zemlin_warmstart!(model, graph, k, solution)
+        end
     end
+    @debug "Warmstart finished in $(format_seconds_readable(totaltime))."
 end
 
 function read_file_as_simplegraph(path::String)
