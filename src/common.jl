@@ -87,15 +87,28 @@ function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, so
     @debug "o = $totalweight"
 end
 
-function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k :: Int)
+function common_solution!(model)
     @debug "Starting to optimize."
     optimizationtime = @elapsed optimize!(model)
     @debug "Finished optimizing in $(format_seconds_readable(optimizationtime, 2))."
     ts = termination_status(model)
     if ts != MOI.OPTIMAL
         @warn "Optimizer did not find an optimal solution."
-        return nothing
+        if ts == MOI.TIME_LIMIT
+            @debug "Time limit of $(format_seconds_readable(time_limit_sec(model))) reached."
+        elseif ts == MOI.INFEASIBLE
+            @error "Problem is infeasible."
+            compute_conflict!(model)
+            cs = MOI.get(model, MOI.ConflictStatus())
+            if MOI.CONFLICT_FOUND
+
+            end
+        end
     end
+end
+
+function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k :: Int)
+    common_solution!(model)
     n :: Int = nv(graph)
     solution_graph :: SimpleWeightedGraph= get_solution_graph(model, graph)
     components = connected_components(solution_graph)
@@ -116,13 +129,12 @@ function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k ::
     end
     ov = objective_value(model)
     ov_ = Int(trunc(ov))
-    @info "Found $k-MST with weight $(ov_)."
-    print_weighted_graph(solution_graph, nothing)
     w = sum(weight(e) for e in edges(solution_graph))
     w_ = Int(round(Int,w))
     if w_ != ov_
         @warn "MILP solver claims objective value is $(ov_), however got $(w_)."
     end
+    return (ov_, solution_graph)
 end
 
 function get_solution_graph(model, graph :: SimpleWeightedGraph)
