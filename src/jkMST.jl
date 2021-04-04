@@ -23,6 +23,36 @@ function isdebug(logger = global_logger())
     return isprinted(Logging.Debug, logger)
 end
 
+@enum HeaderName Filename Graphsize Treesize Opt Sol
+
+function columnoftable(name :: HeaderName; f :: Int = 0, ks :: Int = 0, k :: Int = 0, ms :: Int = 0, m :: Int = 0, sols :: Int = 0, sol :: Int = 0, line :: Int = 0)
+    if name == Filename
+        return 1
+    elseif name == Graphsize
+        return 2
+    elseif name == Treesize
+        return 3
+    elseif name == Opt
+        return 4
+    elseif name == Sol
+        return 4 + Int(sols != 1) + (Int(sols != 1) + ms) * (sol - 1) + m
+    else
+        @assert false "Defensive assert: Illegal case."
+    end
+end
+
+function rowoftable(name :: HeaderName; f :: Int = 0, ks :: Int = 0, k :: Int = 0, ms :: Int = 0, m :: Int = 0, sols :: Int = 0, sol :: Int = 0, line :: Int = 0)
+    if name == Filename || name == Graphsize
+        return 1 + (f - 1) * ks * 2
+    elseif name == Treesize || name == Opt
+        return 1 + (f - 1) * ks * 2 + (k-1) * 2
+    elseif name == Sol
+        return 1 + (f - 1) * ks * 2 + (k-1) * 2 + (line - 1)
+    else
+        @assert false "Defensive assert: Illegal case."
+    end
+end
+
 @enum Solver glpk scip cplex
 
 function solver_from_string(x::AbstractString)
@@ -169,16 +199,15 @@ function main()
         else
             append!(headers, modestrings)
         end
-        data :: Matrix{Union{String, Int}} = fill("", fl * kl, length(headers))
+        data :: Matrix{Union{String, Int}} = fill("", fl * kl * 2, length(headers))
         for (i, file) in enumerate(files)
-            data[1 + ((i-1) * kl), 1] = file
+            data[rowoftable(Filename, f=i, ks = kl), 1] = file
         end
     end
     currenttime = 0
     fspec = FormatSpec("2.2f")
     alltime = @elapsed begin
         for (f,file) in enumerate(files)
-            row::Int = ((f-1) * kl)
             n :: Union{Nothing, Int} = nothing
             for (k,size) in enumerate(sizes)
                 opt :: Union{Nothing, Int} = nothing
@@ -189,23 +218,48 @@ function main()
                             n = n_
                         end
                         @assert n == n_ "Size of graph changed, should be $n is $n_. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                        column = 4 + Int(sl != 1) + m + ((s-1) * (Int(sl != 1) + ml))
                         if terminationstatus == MOI.OPTIMAL
+                            data[
+                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
+                                columnoftable(Sol, f = f, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = format_seconds_readable(solvingtime)
                             if isnothing(opt) 
                                 opt = objectivevalue
-                                data[row + k, 4] = opt
+                            data[
+                                rowoftable(Opt, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
+                                columnoftable(Opt, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = opt
                             end
                             @assert opt == objectivevalue "Objective value of graph changed, should be $opt is $objectivevalue. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                            data[row + k, column] = format_seconds_readable(solvingtime)
                         elseif terminationstatus == MOI.TIME_LIMIT
-                            if !isnothing(opt)
-                                data[row + k, column] = "opt: $(fmt(fspec, 100.0 * (Float64(opt)/Float64(objectivevalue)))) "
+                            if !isnothing(objectivevalue)
+                                if !isnothing(opt)
+                                data[
+                                    rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
+                                    columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = "$(fmt(fspec, 100.0 * (Float64(opt)/Float64(objectivevalue))))%"
+                                else
+                                    data[
+                                        rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
+                                        columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = objectivevalue
+                                end
+                            else
+                                data[
+                                    rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
+                                    columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = "-Inf%"
                             end
-                            data[row + k, column] *= "gap: $(fmt(fspec, gap))%"
+                        if gap < typemax(Int64)
+                            data[
+                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
+                                columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = "$(fmt(fspec, gap))%"
+                        else
+                            data[
+                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
+                                columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = "Inf%"
+                        end
                         else
                             @debug "Unknown Termination Status: $terminationstatus."
                         end
-                        data[row + k, 3] = k_
+                        data[ 
+                            rowoftable(Treesize, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
+                            columnoftable(Treesize, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = k_
                         currenttime += solvingtime
                         if currenttime > 60
                             pretty_table(data, headers)
@@ -213,13 +267,15 @@ function main()
                         end
                     end
                 end
-                if !isnothing(opt)
-                    data[row + k, 4] = opt
-                else
-                    data[row + k, 4] = "unkn."
+                if isnothing(opt)
+                    data[
+                        rowoftable(Opt, f = f, k = k, ks = kl, ms = ml, sols = sl),
+                        columnoftable(Opt, f = f, k = k, ks = kl, ms = ml, sols = sl)] = "Unkn."
                 end
             end
-            data[1 + row, 2] = n
+            data[
+                rowoftable(Graphsize, f = f, ks = kl, ms = ml, sols = sl),
+                columnoftable(Graphsize, f = f, ks = kl, ms = ml, sols = sl)] = n
         end
     end
     pretty_table(data, headers)
@@ -254,14 +310,23 @@ function kMST(path::String, mode::SolvingMode, k::Union{Int, Float64}, solver::S
             #end
         end
     end
-    ov :: Int = -1
+    ov :: Union{Nothing, Int} = -1
     if mode == mtz || mode == scf || mode == mcf
-        (ts, ov,solution_graph) = compact_formulation_solution!(model, graph, k_)
+        (ts, ov, solution_graph) = compact_formulation_solution!(model, graph, k_)
     end
     st = solve_time(model)
     gap = relative_gap(model)
-    @info "Found $k_-MST of weight $(ov) for $path in $mode formulation with $solver in $(format_seconds_readable(st)) + $(format_seconds_readable(inittime)) presolving and initialization."
-    print_weighted_graph(solution_graph, nothing)
+    infomsg = nothing
+    if !isnothing(ov)
+        infomsg = "Found $k_-MST of weight $(ov)"
+    else
+        infomsg = "No feasible solution found in time. $k_-MST"
+    end
+    infomsg *= " for $path in $mode formulation with $solver in $(format_seconds_readable(st)) + $(format_seconds_readable(inittime)) presolving and initialization."
+    @info infomsg
+    if !isnothing(solution_graph)
+        print_weighted_graph(solution_graph, nothing)
+    end
     return (ts, st, ov, gap, n, k_)
 end
 

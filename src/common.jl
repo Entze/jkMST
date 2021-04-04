@@ -88,10 +88,15 @@ function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, so
 end
 
 function common_solution!(model)
-    @debug "Starting to optimize."
-    optimizationtime = @elapsed optimize!(model)
-    @debug "Finished optimizing in $(format_seconds_readable(optimizationtime, 2))."
-    ts = termination_status(model)
+    ts = MOI.UNKNOWN_RESULT_STATUS
+    try
+        @debug "Starting to optimize."
+        optimizationtime = @elapsed optimize!(model)
+        @debug "Finished optimizing in $(format_seconds_readable(optimizationtime, 2))."
+        ts = termination_status(model)
+    catch e
+        @warn "Exception while optimizing. $e"
+    end
     if ts != MOI.OPTIMAL
         warning = "Optimizer did not find an optimal solution."
         if ts == MOI.TIME_LIMIT
@@ -113,6 +118,9 @@ end
 
 function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k :: Int)
     ts = common_solution!(model)
+    if !has_values(model)
+        return (ts, nothing, nothing)
+    end
     n :: Int = nv(graph)
     solution_graph :: SimpleWeightedGraph= get_solution_graph(model, graph)
     components = connected_components(solution_graph)
