@@ -8,7 +8,7 @@ using LightGraphs, SimpleWeightedGraphs
 
 function format_seconds_readable(seconds, digits=2)
     fspec = FormatSpec(".$(digits)f")
-    if (0.1 <= seconds && seconds <= 60.0) || seconds == 0.0
+    if (0.1 <= seconds && seconds <= 120.0) || seconds == 0.0
         return "$(fmt(fspec, seconds))s"
     end
 

@@ -90,6 +90,10 @@ function parse_cmdargs()
         "--quiet", "-q"
             help = "Decrease verbosity."
             action = :count_invocations
+        "--timeout", "-t"
+            help = "Maximum time in seconds spent on a single instance."
+            default = Inf64
+            arg_type = Float64
     end
 
     return parse_args(s)
@@ -129,7 +133,8 @@ function main()
         solverstrings::Vector{String} = parsed_args["solver"]
         solvers::Vector{Solver} = map(solver_from_string, solverstrings)
         sl::Int = length(solvers)
-        @debug "Got $(fl) file$(fl == 1 ? "" : "s"), $(dl) $(dl == 1 ? "directory" : "directories"), $(ml) mode$(ml == 1 ? "" : "s"), $(kl) size$(kl == 1 ? "" : "s"), $(sl) solver$(sl == 1 ? "" : "s")."
+        timeout::Float64 = parsed_args["timeout"]
+        @debug "Got $(fl) file$(fl == 1 ? "" : "s"), $(dl) $(dl == 1 ? "directory" : "directories"), $(ml) mode$(ml == 1 ? "" : "s"), $(kl) size$(kl == 1 ? "" : "s"), $(sl) solver$(sl == 1 ? "" : "s"), $(timeout == Inf64 ? "no" : format_seconds_readable(timeout)) timeout."
         enumdirs = ProgressUnknown(desc="Enumerating files:", dt=0.5, enabled=isdebug())
         ProgressMeter.update!(enumdirs,fl)
         while !isempty(directories)
@@ -151,6 +156,10 @@ function main()
         if fl + dl <= 0
             error("At least one file or directory required.")
         end
+        instances = fl * kl * ml * sl
+        if timeout != Inf64
+            @debug "$instances instances to solve, $(format_seconds_readable(instances * timeout)) runtime upperbound."
+        end
         headers = ["Graph", "|V|", "k", "OPT"]
         if sl > 1
             for s in solverstrings
@@ -165,38 +174,60 @@ function main()
             data[1 + ((i-1) * kl), 1] = file
         end
     end
+    currenttime = 0
+    fspec = FormatSpec("2.2f")
     alltime = @elapsed begin
         for (f,file) in enumerate(files)
+            row::Int = ((f-1) * kl)
             n :: Union{Nothing, Int} = nothing
             for (k,size) in enumerate(sizes)
                 opt :: Union{Nothing, Int} = nothing
                 for (s,solver) in enumerate(solvers)
                     for (m, mode) in enumerate(modes)
-                        (solvingtime, objectivevalue, n_, k_) = kMST(file, mode, size, solver)
+                        (terminationstatus, solvingtime, objectivevalue, gap, n_, k_) = kMST(file, mode, size, solver, timeout=timeout)
                         if isnothing(n)
                             n = n_
                         end
                         @assert n == n_ "Size of graph changed, should be $n is $n_. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                        if isnothing(opt)
-                            opt = objectivevalue
-                        end
-                        @assert opt == objectivevalue "Objective value of graph changed, should be $opt is $objectivevalue. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                        data[((f-1) * kl) + k, 3] = k_
                         column = 4 + Int(sl != 1) + m + ((s-1) * (Int(sl != 1) + ml))
-                        data[((f-1) * kl) + k, column] = format_seconds_readable(solvingtime)
+                        if terminationstatus == MOI.OPTIMAL
+                            if isnothing(opt) 
+                                opt = objectivevalue
+                                data[row + k, 4] = opt
+                            end
+                            @assert opt == objectivevalue "Objective value of graph changed, should be $opt is $objectivevalue. Graph: $file Solver: $solver Mode: $mode Size: $size."
+                            data[row + k, column] = format_seconds_readable(solvingtime)
+                        elseif terminationstatus == MOI.TIME_LIMIT
+                            if !isnothing(opt)
+                                data[row + k, column] = "opt: $(fmt(fspec, 100.0 * (Float64(opt)/Float64(objectivevalue)))) "
+                            end
+                            data[row + k, column] *= "gap: $(fmt(fspec, gap))%"
+                        else
+                            @debug "Unknown Termination Status: $terminationstatus."
+                        end
+                        data[row + k, 3] = k_
+                        currenttime += solvingtime
+                        if currenttime > 60
+                            pretty_table(data, headers)
+                            currenttime = 0
+                        end
                     end
                 end
-                data[((f-1) * kl) + k, 4] = opt
+                if !isnothing(opt)
+                    data[row + k, 4] = opt
+                else
+                    data[row + k, 4] = "unkn."
+                end
             end
-            data[1 + ((f-1) * kl), 2] = n
+            data[1 + row, 2] = n
         end
     end
-    @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
     pretty_table(data, headers)
+    @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
 end
 
 
-function kMST(path::String, mode::SolvingMode, k::Union{Int, Float64}, solver::Solver) :: Tuple{Float64, Int, Int, Int}
+function kMST(path::String, mode::SolvingMode, k::Union{Int, Float64}, solver::Solver; timeout :: Float64 = Inf64)
     @debug ("Solving with: $(string(YELLOW_FG(uppercase(string(solver))))).")
     @debug ("Reading file: $(string(CYAN_FG(path))).")
     @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
@@ -215,15 +246,23 @@ function kMST(path::String, mode::SolvingMode, k::Union{Int, Float64}, solver::S
         else
             model = generate_model(graph, mode, k_, solver)
         end
+        if timeout != Inf64
+            set_time_limit_sec(model, timeout)
+            #if solver == glpk
+                #@debug "Setting timeout for glpk: $(format_seconds_readable(round(timeout)))"
+                #set_optimizer_attribute(model, "tm_lim", Int(round(timeout)))
+            #end
+        end
     end
     ov :: Int = -1
     if mode == mtz || mode == scf || mode == mcf
-        (ov,solution_graph) = compact_formulation_solution!(model, graph, k_)
+        (ts, ov,solution_graph) = compact_formulation_solution!(model, graph, k_)
     end
     st = solve_time(model)
-    @info "Found $k-MST of weight $(ov) for $path in $mode formulation with $solver in $(format_seconds_readable(st)) + $(format_seconds_readable(inittime)) presolving and initialization."
+    gap = relative_gap(model)
+    @info "Found $k_-MST of weight $(ov) for $path in $mode formulation with $solver in $(format_seconds_readable(st)) + $(format_seconds_readable(inittime)) presolving and initialization."
     print_weighted_graph(solution_graph, nothing)
-    return (st, ov, n, k_)
+    return (ts, st, ov, gap, n, k_)
 end
 
 function presolve(graph::SimpleWeightedGraph, k::Int)
@@ -287,6 +326,11 @@ function generate_model(graph::SimpleWeightedGraph,
         set_optimizer(model, optimizer)
         if !isdebug()
             set_silent(model)
+        else
+            unset_silent(model)
+            if solver == glpk
+                set_optimizer_attribute(model, "msg_lev", GLPK.GLP_MSG_ON)
+            end
         end
 
         basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
