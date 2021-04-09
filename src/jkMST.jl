@@ -1,7 +1,5 @@
-module jkMST
 
 using Logging
-using ArgParse
 using Crayons.Box
 using LightGraphs, SimpleWeightedGraphs
 using JuMP
@@ -15,17 +13,29 @@ include("heuristic.jl")
 include("util.jl")
 include("mtz.jl")
 
-function isprinted(level, logger = global_logger())
-    return Logging.min_enabled_level(logger) <= level 
-end
-
-function isdebug(logger = global_logger())
-    return isprinted(Logging.Debug, logger)
-end
-
 @enum HeaderName Filename Graphsize Treesize Opt Sol
 
-function columnoftable(name :: HeaderName; f :: Int = 0, ks :: Int = 0, k :: Int = 0, ms :: Int = 0, m :: Int = 0, sols :: Int = 0, sol :: Int = 0, line :: Int = 0)
+function colot(name::HeaderName;
+                        f::Union{Int, Nothing}=nothing,
+                        ks::Union{Int, Nothing}=nothing,
+                        k::Union{Int, Nothing}=nothing,
+                        ms::Union{Int, Nothing}=nothing,
+                        m::Union{Int, Nothing}=nothing,
+                        sols::Union{Int, Nothing}=nothing,
+                        sol::Union{Int, Nothing}=nothing,
+                        line::Union{Int, Nothing}=nothing)
+    return columnoftable(name, f=f, ks=ks, k=k, ms=ms, m=m, sols=sols, sol=sol, line=line)
+end
+
+function columnoftable(name::HeaderName;
+                        f::Union{Int, Nothing}=nothing,
+                        ks::Union{Int, Nothing}=nothing,
+                        k::Union{Int, Nothing}=nothing,
+                        ms::Union{Int, Nothing}=nothing,
+                        m::Union{Int, Nothing}=nothing,
+                        sols::Union{Int, Nothing}=nothing,
+                        sol::Union{Int, Nothing}=nothing,
+                        line::Union{Int, Nothing}=nothing)
     if name == Filename
         return 1
     elseif name == Graphsize
@@ -35,25 +45,56 @@ function columnoftable(name :: HeaderName; f :: Int = 0, ks :: Int = 0, k :: Int
     elseif name == Opt
         return 4
     elseif name == Sol
+        @assert !isnothing(sols) "sols is not defined."
+        @assert !isnothing(sol) "sol is not defined."
+        @assert !isnothing(ms) "ms is not defined."
+        @assert !isnothing(m) "m is not defined."
         return 4 + Int(sols != 1) + (Int(sols != 1) + ms) * (sol - 1) + m
     else
         @assert false "Defensive assert: Illegal case."
     end
 end
 
-function rowoftable(name :: HeaderName; f :: Int = 0, ks :: Int = 0, k :: Int = 0, ms :: Int = 0, m :: Int = 0, sols :: Int = 0, sol :: Int = 0, line :: Int = 0)
+function rowot(name::HeaderName;
+                    f::Union{Int, Nothing}=nothing,
+                    ks::Union{Int, Nothing}=nothing,
+                    k::Union{Int, Nothing}=nothing,
+                    ms::Union{Int, Nothing}=nothing,
+                    m::Union{Int, Nothing}=nothing,
+                    sols::Union{Int, Nothing}=nothing,
+                    sol::Union{Int, Nothing}=nothing,
+                    line::Union{Int, Nothing}=nothing)
+    return rowoftable(name, f=f, ks=ks, k=k, ms=ms, m=m, sols=sols, sol=sol, line=line)
+end
+
+function rowoftable(name::HeaderName;
+                    f::Union{Int, Nothing}=nothing,
+                    ks::Union{Int, Nothing}=nothing,
+                    k::Union{Int, Nothing}=nothing,
+                    ms::Union{Int, Nothing}=nothing,
+                    m::Union{Int, Nothing}=nothing,
+                    sols::Union{Int, Nothing}=nothing,
+                    sol::Union{Int, Nothing}=nothing,
+                    line::Union{Int, Nothing}=nothing)
     if name == Filename || name == Graphsize
+        @assert !isnothing(f) "f is not defined."
+        @assert !isnothing(ks) "ks is not defined."
         return 1 + (f - 1) * ks * 2
     elseif name == Treesize || name == Opt
-        return 1 + (f - 1) * ks * 2 + (k-1) * 2
+        @assert !isnothing(f) "f is not defined."
+        @assert !isnothing(ks) "ks is not defined."
+        @assert !isnothing(k) "k is not defined."
+        return 1 + (f - 1) * ks * 2 + (k - 1) * 2
     elseif name == Sol
-        return 1 + (f - 1) * ks * 2 + (k-1) * 2 + (line - 1)
+        @assert !isnothing(f) "f is not defined."
+        @assert !isnothing(ks) "ks is not defined."
+        @assert !isnothing(k) "k is not defined."
+        @assert !isnothing(line) "line is not defined."
+        return 1 + (f - 1) * ks * 2 + (k - 1) * 2 + (line - 1)
     else
         @assert false "Defensive assert: Illegal case."
     end
 end
-
-@enum Solver glpk scip cplex
 
 function solver_from_string(x::AbstractString)
     i::Int = -1
@@ -70,8 +111,6 @@ function solver_from_string(x::AbstractString)
     return Solver(i)
 end
 
-@enum SolvingMode mtz scf mcf cec dcc
-
 function solvingmode_from_string(x::AbstractString)
     i::Int = -1
     for mode in instances(SolvingMode)
@@ -86,248 +125,216 @@ function solvingmode_from_string(x::AbstractString)
     return SolvingMode(i)
 end
 
-
-function parse_cmdargs()
-    s = ArgParseSettings(prog="jkMST", version="1.0", add_version = true)
-
-    @add_arg_table! s begin
-        "--directory", "-d"
-            help = "A directory containing graph files. All subdirectories are considered. Only files with extension .dat are read."
-            nargs = '*'
-            arg_type = String
-        "--file", "-f"
-            help = "A graph represented as file. Any file extension is permitted."
-            nargs = '*'
-            arg_type = String
-        "--mode", "-m"
-            help = "The solving method. Every instance is solved with every argument. (Allowed values: $(string([string(v) for v in instances(SolvingMode)])))"
-            default = ["mtz"]
-            nargs = '+'
-            arg_type = String
-        "--size", "-k"
-            help = "Size of the k-MST. If k ∈ [0,1] interpreted as fraction of |V|. If k > 1 interpreted as absolute value. Every instance is solved with every argument."
-            required = true
-            nargs = '+'
-            arg_type = String
-        "--verbose", "-v"
-            help = "Increase verbosity."
-            action = :count_invocations
-        "--solver", "-s"
-            help = "The solver. Every instance is solved with every argument. (Allowed values: $(string([string(v) for v in instances(Solver)]))"
-            default = ["cplex"]
-            nargs = '+'
-            arg_type = String
-        "--quiet", "-q"
-            help = "Decrease verbosity."
-            action = :count_invocations
-        "--timeout", "-t"
-            help = "Maximum time in seconds spent on a single instance."
-            default = Inf64
-            arg_type = Float64
+function main(;files::Vector{String}=[],
+                directories::Vector{String}=[],
+                modestrings::Vector{String}=["mtz"],
+                kstrings::Vector{String}=["1.0"],
+                solverstrings::Vector{String}=["cplex"],
+                timeout_sec::Float64=Inf64,
+                preprocessinstances::Bool=true,
+                preprocesstimeout::Float64=Inf64,
+                printsolutiongraphs::Bool=true,
+                printintermediatetable::Bool=true,
+                intermediatetableinterval::Float64=60.0,
+                tablestyle::String="text"
+                )
+    fl::Int = length(files)
+    dl::Int = length(directories)
+    modes::Vector{SolvingMode} = map(solvingmode_from_string, modestrings)
+    ml::Int = length(modes)
+    ks::Vector{Union{Float64,Int}} = map(s -> begin
+        v::Float64 = parse(Float64, s)
+        if v > 1 && v == trunc(Float64, v)
+        return Int(trunc(Int, v))
     end
-
-    return parse_args(s)
-end
-
-const loglevels = [Logging.Debug, Logging.Info, Logging.Warn, Logging.Error]
-
-function main()
-    setuptime = @elapsed begin
-        parsed_args = parse_cmdargs()
-        verbosity::Int = parsed_args["verbose"]
-        quiet::Int = parsed_args["quiet"]
-        level = loglevels[max(1, min(4, 2 + (quiet - verbosity)))]
-        logger = Logging.ConsoleLogger(stdout, level)
-        global_logger(logger)
-        @debug "LogLevel: $(Logging.min_enabled_level(logger)), isdebug: $(isdebug())."
-        files::Vector{String} = parsed_args["file"]
-        fl::Int = length(files)
-        directories::Vector{String} = parsed_args["directory"]
-        dl::Int = length(directories)
-        modestrings::Vector{String} = parsed_args["mode"]
-        modes::Vector{SolvingMode} = map(solvingmode_from_string, modestrings)
-        ml::Int = length(modes)
-        sizestrings::Vector{String} = parsed_args["size"]
-        sizes :: Vector{Union{Float64, Int}} = map(s -> begin
-            v :: Union{Float64, Int} = parse(Float64, s)
-            if v > 1 && v == trunc(v)
-                v = Int(trunc(v))
-                return v
-            end
-            if !(0 <= v <= 1)
-                error("Specified illegal k=$s. Should be Float ∈ [0,1] or Int if > 1.")
-            end
-            return v
-        end, sizestrings)
-        kl::Int = length(sizes)
-        solverstrings::Vector{String} = parsed_args["solver"]
-        solvers::Vector{Solver} = map(solver_from_string, solverstrings)
-        sl::Int = length(solvers)
-        timeout::Float64 = parsed_args["timeout"]
-        @debug "Got $(fl) file$(fl == 1 ? "" : "s"), $(dl) $(dl == 1 ? "directory" : "directories"), $(ml) mode$(ml == 1 ? "" : "s"), $(kl) size$(kl == 1 ? "" : "s"), $(sl) solver$(sl == 1 ? "" : "s"), $(timeout == Inf64 ? "no" : format_seconds_readable(timeout)) timeout."
-        enumdirs = ProgressUnknown(desc="Enumerating files:", dt=0.5, enabled=isdebug())
-        ProgressMeter.update!(enumdirs,fl)
-        while !isempty(directories)
-            directory = pop!(directories)
-            for (root, dirs, fs) in walkdir(directory)
-                for dir in dirs
-                    push!(directories, dir)
-                end
-                for file in fs
-                    if endswith(file, ".dat")
-                        push!(files, joinpath(root, file))
-                        ProgressMeter.next!(enumdirs)
-                    end
-                end
-            end
-        end
-        ProgressMeter.finish!(enumdirs)
-        fl = length(files)
-        if fl + dl <= 0
-            error("At least one file or directory required.")
-        end
-        instances = fl * kl * ml * sl
-        if timeout != Inf64
-            @debug "$instances instances to solve, $(format_seconds_readable(instances * timeout)) runtime upperbound."
-        end
-        headers = ["Graph", "|V|", "k", "OPT"]
-        if sl > 1
-            for s in solverstrings
-                push!(headers, s)
-                append!(headers, modestrings)
-            end
-        else
-            append!(headers, modestrings)
-        end
-        data :: Matrix{Union{String, Int}} = fill("", fl * kl * 2, length(headers))
-        for (i, file) in enumerate(files)
-            data[rowoftable(Filename, f=i, ks = kl), 1] = file
-        end
+        if !(0 <= v <= 1)
+        error("Specified illegal k=$s. Should be Float ∈ [0,1] or Int if > 1.")
     end
-    currenttime = 0
-    fspec = FormatSpec("2.2f")
-    alltime = @elapsed begin
-        for (f,file) in enumerate(files)
-            n :: Union{Nothing, Int} = nothing
-            for (k,size) in enumerate(sizes)
-                opt :: Union{Nothing, Int} = nothing
-                for (s,solver) in enumerate(solvers)
-                    for (m, mode) in enumerate(modes)
-                        (terminationstatus, solvingtime, objectivevalue, gap, n_, k_) = kMST(file, mode, size, solver, timeout=timeout)
-                        if isnothing(n)
-                            n = n_
-                        end
-                        @assert n == n_ "Size of graph changed, should be $n is $n_. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                        if terminationstatus == MOI.OPTIMAL
-                            data[
-                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
-                                columnoftable(Sol, f = f, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = format_seconds_readable(solvingtime)
-                            if isnothing(opt) 
-                                opt = objectivevalue
-                            data[
-                                rowoftable(Opt, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
-                                columnoftable(Opt, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = opt
-                            end
-                            @assert opt == objectivevalue "Objective value of graph changed, should be $opt is $objectivevalue. Graph: $file Solver: $solver Mode: $mode Size: $size."
-                        elseif terminationstatus == MOI.TIME_LIMIT
-                            if !isnothing(objectivevalue)
-                                if !isnothing(opt)
-                                data[
-                                    rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
-                                    columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = "$(fmt(fspec, 100.0 * (Float64(opt)/Float64(objectivevalue))))%"
-                                else
-                                    data[
-                                        rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
-                                        columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = objectivevalue
-                                end
-                            else
-                                data[
-                                    rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1),
-                                    columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 1)] = "-Inf%"
-                            end
-                        if gap < typemax(Int64)
-                            data[
-                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
-                                columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = "$(fmt(fspec, gap))%"
-                        else
-                            data[
-                                rowoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
-                                columnoftable(Sol, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = "Inf%"
-                        end
-                        else
-                            @debug "Unknown Termination Status: $terminationstatus."
-                        end
-                        data[ 
-                            rowoftable(Treesize, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2),
-                            columnoftable(Treesize, f = f, k = k, ks = kl, m = m, ms = ml, sols = sl, sol = s, line = 2)] = k_
-                        currenttime += solvingtime
-                        if currenttime > 60
-                            pretty_table(data, headers)
-                            currenttime = 0
-                        end
-                    end
-                end
-                if isnothing(opt)
-                    data[
-                        rowoftable(Opt, f = f, k = k, ks = kl, ms = ml, sols = sl),
-                        columnoftable(Opt, f = f, k = k, ks = kl, ms = ml, sols = sl)] = "Unkn."
-                end
-            end
-            data[
-                rowoftable(Graphsize, f = f, ks = kl, ms = ml, sols = sl),
-                columnoftable(Graphsize, f = f, ks = kl, ms = ml, sols = sl)] = n
-        end
+        return v
+    end, kstrings)
+    kl::Int = length(ks)
+    solvers::Vector{Solver} = map(solver_from_string, solverstrings)
+    sl::Int = length(solvers)
+    @debug "Got $(fl) file$(fl == 1 ? "" : "s"), $(dl) $(dl == 1 ? "directory" : "directories"), $(ml) mode$(ml == 1 ? "" : "s"), $(kl) size$(kl == 1 ? "" : "s"), $(sl) solver$(sl == 1 ? "" : "s"), $(timeout == Inf64 ? "no" : format_seconds_readable(timeout)) timeout."
+    fl = enumeratefiles!(files, directories, fl=fl)
+    if fl == 0
+        return
     end
-    pretty_table(data, headers)
-    @debug "Finished in $(format_seconds_readable(alltime)) + $(format_seconds_readable(setuptime)) setup time."
-end
-
-
-function kMST(path::String, mode::SolvingMode, k::Union{Int, Float64}, solver::Solver; timeout :: Float64 = Inf64)
-    @debug ("Solving with: $(string(YELLOW_FG(uppercase(string(solver))))).")
-    @debug ("Reading file: $(string(CYAN_FG(path))).")
-    @debug ("Solving in: $(string(MAGENTA_FG(string(mode)))) mode.")
-    @debug ("Spanning tree-size: $(string(GREEN_FG(string(k)))).")
-    graph = read_file_as_simplegraph(path)
-    n::Int = nv(graph) - 1
-    k_ = k
-    if 0 <= k <= 1
-        k_ = Int(floor(k * n))
-    end
-    inittime = @elapsed begin
-        if solver != glpk
-            (pre, ub) = presolve(graph, k_)
-            model = generate_model(graph, mode, k_, solver, upperbound=ub)
-            warmstart_model!(model, graph, mode, k_, pre)
-        else
-            model = generate_model(graph, mode, k_, solver)
-        end
-        if timeout != Inf64
-            set_time_limit_sec(model, timeout)
-            #if solver == glpk
-                #@debug "Setting timeout for glpk: $(format_seconds_readable(round(timeout)))"
-                #set_optimizer_attribute(model, "tm_lim", Int(round(timeout)))
-            #end
-        end
-    end
-    ov :: Union{Nothing, Int} = -1
-    if mode == mtz || mode == scf || mode == mcf
-        (ts, ov, solution_graph) = compact_formulation_solution!(model, graph, k_)
-    end
-    st = solve_time(model)
-    gap = relative_gap(model)
-    infomsg = nothing
-    if !isnothing(ov)
-        infomsg = "Found $k_-MST of weight $(ov)"
+    @assert fl > 0
+    tablestyle = lowercase(tablestyle)
+    if tablestyle == "text"
+        tablebackend = :text
+    elseif tablestyle == "html"
+        tablebackend = :html
+    elseif tablestyle == "latex"
+        tablebackend = :latex
     else
-        infomsg = "No feasible solution found in time. $k_-MST"
+        error("Unknown tablestyle: $tablestyle")
     end
-    infomsg *= " for $path in $mode formulation with $solver in $(format_seconds_readable(st)) + $(format_seconds_readable(inittime)) presolving and initialization."
-    @info infomsg
-    if !isnothing(solution_graph)
-        print_weighted_graph(solution_graph, nothing)
+    instances::Int = fl * kl * ml * sl
+    if timeout != Inf64
+        @debug "$instances instance$(instances == 1 ? "" : "s") to solve, $(format_seconds_readable(instances * timeout)) runtime upperbound."
     end
-    return (ts, st, ov, gap, n, k_)
+    (header, data) = generatetable(files=files, fl=fl, solverstrings=solverstrings, sl=sl, modestrings=modestrings, ml=ml, ks=ks, kl=kl)
+    kMSTs!(files=files,
+            fl=fl,
+            sizes=ks,
+            kl=kl,
+            solvers=solvers,
+            sl=sl,
+            modes=modes,
+            ml=ml,
+            timeout_sec=timeout_sec,
+            header=header,
+            data=data,
+            preprocessinstances=preprocessinstances,
+            preprocesstimeout=preprocesstimeout,
+            printintermediatetable=printintermediatetable,
+            intermediatetableinterval=intermediatetableinterval,
+            tablebackend=tablebackend)
+    return
+end
+
+function enumeratefiles!(files::Vector{String}=[], directories::Vector{String}=[];fl::Int=length(files))::Int
+    enumfiles = ProgressUnknown(desc="Enumerating files:", dt=0.5, enabled=isdebug())
+    ProgressMeter.update!(enumfiles, fl)
+    while !isempty(directories)
+        directory = pop!(directories)
+        for (root, dirs, fs) in walkdir(directory)
+            for dir in dirs
+                push!(directories, dir)
+            end
+            for file in fs
+                if endswith(file, ".dat")
+                    push!(files, joinpath(root, file))
+                    ProgressMeter.next!(enumfiles)
+                end
+    end
+        end
+    end
+    ProgressMeter.finish!(enumfiles)
+    fl = length(files)
+    @debug "Found $fl file$(fl == 1 ? "" : "s")."
+    return fl
+end
+
+function generatetable(;files::Vector{String}=[],
+                        fl::Int=length(files),
+                        solverstrings::Vector{String}=[],
+                        sl::Int=length(solverstrings),
+                        modestrings::Vector{String}=[],
+                        ml::Int=length(modestrings),
+                        ks::Vector{Union{Int, Float64}} = [],
+                        kl::Int=length(ks))::Tuple{Vector{String},Matrix{Union{Int, Float64,String}}}
+    header = ["Graph", "|V|", "k", "OPT"]
+    if sl > 1
+        for s in solverstrings
+            push!(header, s)
+            append!(header, modestrings)
+        end
+    else
+        append!(header, modestrings)
+    end
+    data::Matrix{Union{String, Int, Float64}} = fill("", fl * kl * 2, length(header))
+    for (f, file) in enumerate(files)
+        data[rowot(Filename, f=f, ks=kl), colot(Filename)] = file
+        for (k, size) in enumerate(ks)
+            data[rowot(Treesize, f=f, k=k, ks=kl), colot(Treesize)] = size
+        end
+    end
+    return (header, data)
+end
+
+function kMSTs!(;
+    files::Vector{String} = [],
+    fl::Int=length(files),
+    sizes::Vector{Union{Float64, Int}} = [],
+    kl::Int=length(sizes),
+    solvers::Vector{Solver} = [],
+    sl::Int=length(solvers),
+    modes::Vector{SolvingMode} = [],
+    ml::Int=length(modes),
+    timeout_sec::Float64 = Inf64,
+    header::Vector{String}=[],
+    data::Matrix{Union{String, Int, Float64}}=[],
+    preprocessinstances::Bool=true,
+    preprocesstimeout::Float64=Inf64,
+    printintermediatetable::Bool = true,
+    intermediatetableinterval::Float64 = 60.0,
+    printsolutiongraphs::Bool=true,
+    tablebackend::Symbol=:text
+    )
+    currenttime::Float64 = 0.0
+    for (f, file) in enumerate(files)
+        graph::SimpleWeightedGraph = read_file_as_simplegraph(file)
+        n::Int = nv(graph) - 1
+        data[rowot(Graphsize, f=f, ks=kl), colot(Graphsize, f=f, ks=kl)] = n
+        for (k, size) in enumerate(sizes)
+            treesize :: Int = 0
+            if 0 <= size <= 1
+                treesize = Int(floor(Int, (n * size)))
+            else
+                treesize = size
+            end
+            data[rowot(Treesize, f=f, k=k, ks=kl), colot(Treesize, f=f, k=k, ks=kl)] = treesize
+            initialsolution::Union{Vector{Edge{Int}}, Nothing} = nothing
+            lb::Int = 0
+            ub::Int = typemax(Int)
+            if preprocessinstances
+                @debug "Preprocessing instance $file."
+                preprocesstime = @elapsed (initialsolution, lb, ub) = preprocess(graph, treesize, preprocesstimeout)
+                @debug "Preprocessed instance $file with lb: $(string(CYAN_FG(string(lb)))), ub: $(string(MAGENTA_FG(string(ub)))), in $(format_seconds_readable(preprocesstime))."
+            end
+            opt::Union{Nothing,Int} = nothing
+            for (s, solver) in enumerate(solvers)
+                for (m, mode) in enumerate(modes)
+                    line1::Union{String, Int, Float64} = ""
+                    line2::Union{String, Int, Float64} = ""
+                    @debug "Starting instance $file, with size $treesize, solver $solver and mode $mode."
+                    kmstsolutionreport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub,printsolutiongraphs=printsolutiongraphs)
+                    infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
+                    if kmstsolutionreport.termination_status != MOI.OPTIMAL
+                        infostring *=  string(RED_FG("Did not find an optimal solution."))
+                        line1 = kmstsolutionreport.objective_value
+                        line2 = format_ratio_readable(kmstsolutionreport.relative_gap)
+                    else
+                        line1 = format_seconds_readable(kmstsolutionreport.solve_time_sec)
+                        @assert isnothing(opt) || opt == kmstsolutionreport.objective_value "Optimal value changed from $opt to $(kmstsolutionreport.objective_value)."
+                        opt = kmstsolutionreport.objective_value
+                    end
+                    infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
+                    #TODO: write into lines
+
+                end
+            end
+            if isnothing(opt)
+                data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = "Unkn."
+            end
+        end
+    end
+    pretty_table(data, header, backend=tablebackend)
+end
+
+struct KMSTSolutionReport
+    termination_status :: MOI.TerminationStatusCode
+    objective_value :: Union{Int, Nothing}
+    relative_gap :: Float64
+    solve_time_sec :: Float64
+end
+
+function kMST(graph :: SimpleWeightedGraph, mode::SolvingMode, k::Int, solver::Solver; timeout_sec::Float64=Inf64, initialsolution :: Union{Vector{Edge{Int}}, Nothing}=nothing, lowerbound::Int=0, upperbound::Int=typemax(Int), printsolutiongraphs::Bool=true) :: KMSTSolutionReport
+    n::Int = nv(graph) - 1
+    model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound)
+    if !isnothing(initialsolution) && solver != glpk
+        warmstart_model!(model, graph, mode, k, initialsolution)
+    end
+
+    kmstsolution = solve!(model, graph, k)
+    if printsolutiongraphs
+        print_weighted_graph(kmstsolution.solution_graph)
+    end
+
+    return KMSTSolutionReport(kmstsolution.termination_status, Int(round(Int, kmstsolution.objective_value)), kmstsolution.relative_gap, kmstsolution.solve_time_sec)
 end
 
 function presolve(graph::SimpleWeightedGraph, k::Int)
@@ -372,51 +379,55 @@ function presolve(graph::SimpleWeightedGraph, k::Int)
     return (best, bestweight)
 end
 
+function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
+    return ([], 0, typemax(Int))
+end
+
 function generate_model(graph::SimpleWeightedGraph,
         mode::SolvingMode,
         k::Int,
         solver::Solver;
-        lowerbound=typemin(Int),
-        upperbound=typemax(Int))
-    @debug "Generating model."
+        timeout_sec::Float64 = Inf64,
+        lowerbound::Int = 0,
+        upperbound::Int = typemax(Int))
     model = Model()
-    modeltime = @elapsed begin
+    if solver == glpk
+        set_optimizer(model, GLPK.Optimizer)
+    elseif solver == cplex
+        set_optimizer(model, CPLEX.Optimizer)
+    elseif solver == scip
+        set_optimizer(model, SCIP.Optimizer)
+    else
+        @assert false "Defensive assert: Unhandled solver $solver."
+    end
+    if !isdebug()
+        set_silent(model)
+    else
+        unset_silent(model)
         if solver == glpk
-            optimizer = GLPK.Optimizer
-        elseif solver == cplex
-            optimizer = CPLEX.Optimizer
-        else
-            optimizer = SCIP.Optimizer
-        end
-        set_optimizer(model, optimizer)
-        if !isdebug()
-            set_silent(model)
-        else
-            unset_silent(model)
-            if solver == glpk
-                set_optimizer_attribute(model, "msg_lev", GLPK.GLP_MSG_ON)
-            end
-        end
-
-        basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
-        if mode == mtz
-            miller_tuckin_zemlin!(model, graph, k)
+            set_optimizer_attribute(model, "msg_lev", GLPK.GLP_MSG_ON)
         end
     end
-    @debug "Generated model in $(format_seconds_readable(modeltime)):"
+    if timeout_sec != Inf64
+        if timeout < 0
+            error("Timeout should be positive")
+        end
+        set_time_limit_sec(model, timeout)
+    end
+
+    basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
+    if mode == mtz
+        miller_tuckin_zemlin!(model, graph, k)
+    end
     @debug model
     return model
 end
 
-function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, k::Int, solution)
-    @debug "Warmstart:"
-    totaltime = @elapsed begin
-        basic_kmst_warmstart!(model, graph, k, solution)
-        if mode == mtz
-            miller_tuckin_zemlin_warmstart!(model, graph, k, solution)
-        end
+function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, k::Int, solution::Vector{Edge{Int}})
+    basic_kmst_warmstart!(model, graph, k, solution)
+    if mode == mtz
+        miller_tuckin_zemlin_warmstart!(model, graph, k, solution)
     end
-    @debug "Warmstart finished in $(format_seconds_readable(totaltime))."
 end
 
 function read_file_as_simplegraph(path::String)
@@ -472,4 +483,3 @@ function read_file_as_simplegraph(path::String)
 end
 
 
-end

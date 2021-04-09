@@ -6,26 +6,27 @@ using Formatting
 using Logging
 using LightGraphs, SimpleWeightedGraphs
 
-function format_seconds_readable(seconds, digits=2)
+function format_seconds_readable(seconds, digits=2)::String
     fspec = FormatSpec(".$(digits)f")
-    if (0.1 <= seconds && seconds <= 120.0) || seconds == 0.0
+    if 0.1 <= seconds <= 120.0 || seconds == 0.0
         return "$(fmt(fspec, seconds))s"
     end
 
     if seconds > 60.0
         # Up
         minutes = seconds / 60.0
-        if minutes > 60.0
+        if minutes > 120.0
             hours = minutes / 60.0
             return "$(fmt(fspec, hours))h"
         end
         return "$(fmt(fspec, minutes))m"
     else
+        @assert seconds < 0.11
         # Down
         milliseconds = seconds * 1000.0
-        if milliseconds < 1.0
+        if milliseconds < 0.1
             microseconds = milliseconds * 1000.0
-            if microseconds < 1.0
+            if microseconds < 0.1
                 nanoseconds = milliseconds * 1000.0
                 return "$(fmt(fspec, nanoseconds))ns"
             end
@@ -34,6 +35,38 @@ function format_seconds_readable(seconds, digits=2)
         return "$(fmt(fspec, milliseconds))ms"
     end
     return string(seconds)
+end
+
+function format_ratio_readable(amount :: Number, max:: Number = 1, digits=2)::String
+    fspec = FormatSpec(".$(digits)f")
+    perc::Rational{Number} = amount//max
+    perc *= 100
+    if 1//5 <= perc || perc == 0
+        return "$(fmt(fspec, perc))%"
+    end
+
+    perc *= 100
+
+    if 1//5 <= perc
+        return "$(fmt(fspec, perc))‰"
+    end
+    
+    perc *= 100
+
+    if 1//5 <= perc
+        return "$(fmt(fspec, perc))‱"
+    end
+
+    perc *= 100
+
+    if 1//5 <= perc
+        return "$(fmt(fspec, perc))pcm"
+    end
+
+    perc *= 100
+
+    return "$(fmt(fspec, perc))ppm"
+
 end
 
 function print_weighted_graph(graph::SimpleWeightedGraph, level=nothing, numberofvertices=nv(graph), numberofedges=ne(graph))

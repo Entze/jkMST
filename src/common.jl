@@ -47,12 +47,11 @@ function basic_kmst!(model,
     @objective(model, Min, o)
 end
 
-function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, solution)
+function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, solution :: Vector{Edge{Int}})
     n :: Int = nv(graph)
     m :: Int = ne(graph)
     es :: Vector{SimpleWeightedEdge} = collect(edges(graph))
-    sort!(es, by=weight)
-    sort!(es, by=dst, alg=MergeSort)
+    sort!(es, by=dst)
     sort!(es, by=src, alg=MergeSort)
     x :: Vector{Int} = zeros(Int, m)
     totalweight :: Int = 0
@@ -75,7 +74,6 @@ function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, so
         d = dst(e)
         if src(e) != 1 && dst(e) != 1
             set_start_value(variable_by_name(model, "x[$r]"), x[r])
-            @debug("x[$r] = $(x[r])")
             y_ij = start_value(variable_by_name(model, "y[$s,$d]"))
             y_ji = start_value(variable_by_name(model, "y[$d,$s]"))
             if !isnothing(y_ij) && !isnothing(y_ji) && y_ij + y_ji != x[r]
@@ -84,11 +82,18 @@ function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, so
         end
     end
     set_start_value(variable_by_name(model, "o"), totalweight)
-    @debug "o = $totalweight"
 end
 
-function common_solution!(model)
-    ts = MOI.UNKNOWN_RESULT_STATUS
+struct KMSTSolution
+    termination_status :: MOI.TerminationStatusCode
+    solution_graph :: Union{SimpleWeightedGraph, Nothing}
+    objective_value :: Float64
+    relative_gap :: Float64
+    solve_time_sec :: Float64
+end
+
+function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
+    ts :: MOI.TerminationStatusCode = MOI.INTERRUPTED
     try
         @debug "Starting to optimize."
         optimizationtime = @elapsed optimize!(model)
@@ -109,20 +114,18 @@ function common_solution!(model)
 
             end
         else
-            warning *= "$ts"
+            warning *= " $ts"
         end
         @warn warning
     end
-    return ts
-end
 
-function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k :: Int)
-    ts = common_solution!(model)
+    st :: Float64 = solve_time(model)
+    rg :: Float64 = relative_gap(model)
     if !has_values(model)
-        return (ts, nothing, nothing)
+        return KMSTSolution(ts, nothing, Inf64, rg, st)
     end
-    n :: Int = nv(graph)
-    solution_graph :: SimpleWeightedGraph= get_solution_graph(model, graph)
+    n::Int = nv(graph)
+    solution_graph::SimpleWeightedGraph = get_solution_graph(model, graph)
     components = connected_components(solution_graph)
     if ne(solution_graph) != k-1
         @error "Solution has wrong number of edges."
@@ -133,20 +136,19 @@ function compact_formulation_solution!(model, graph :: SimpleWeightedGraph, k ::
         @debug "Should have $(n - k + 1) components but has $(length(components))."
     end
     for component in components
-        cl = length(component)
+        cl::Int = length(component)
         if cl != 1 && cl != k
             @error "Solution is not connected." maxlog=1
             @debug "Should only have components with size 1 or $k but found with size $cl: $(component)."
         end
     end
-    ov = objective_value(model)
-    ov_ = Int(round(ov))
-    w = sum(weight(e) for e in edges(solution_graph))
-    w_ = Int(round(Int,w))
-    if w_ != ov_
-        @warn "MILP solver claims objective value is $(ov_), however got $(w_)."
+    ov::Float64 = objective_value(model)
+    ovrounded::Int = Int(round(ov))
+    w::Int = sum(Int(round(Int,weight(e))) for e in edges(solution_graph))
+    if w != ovrounded
+        @warn "MILP solver claims objective value is $ovrounded ($ov), however got $(w)."
     end
-    return (ts, ov_, solution_graph,)
+    return KMSTSolution(ts, solution_graph, ov, rg, st)
 end
 
 function get_solution_graph(model, graph :: SimpleWeightedGraph)

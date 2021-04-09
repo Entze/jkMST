@@ -76,9 +76,7 @@ function miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k 
             if !marked[n]
                 push!(stack, n)
                 set_start_value(variable_by_name(model, "y[$n,$node]"), 1)
-                @debug "y[$n,$node] = 1"
                 set_start_value(variable_by_name(model, "y[$node,$n]"), 0)
-                @debug "y[$node,$n] = 0"
             end
         end
         marked[node] = true
@@ -94,9 +92,7 @@ function miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k 
             for j in 2:nvg
                 if has_edge(graph, i, j)
                     set_start_value(variable_by_name(model, "y[$i,$j]"), 0)
-                    @debug "y[$i,$j] = 0"
                     set_start_value(variable_by_name(model, "y[$j,$i]"), 0)
-                    @debug "y[$j,$i] = 0"
                 end
             end
         end
