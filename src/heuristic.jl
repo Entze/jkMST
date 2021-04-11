@@ -5,7 +5,7 @@ using LightGraphs, SimpleWeightedGraphs
 function prim_heuristic(graph::SimpleWeightedGraph,
     k::Int;
     startnode::Union{Nothing,Int}=nothing,
-    upperbound=typemax(Int))
+    upperbound=typemax(Int))::Union{Tuple{Vector{Edge{Int}}, Int}, Nothing}
     n = nv(graph)
     es = edges(graph)
     es = collect(SimpleWeightedEdge, es)
@@ -99,5 +99,52 @@ function prim_heuristic(graph::SimpleWeightedGraph,
     @debug "Prim $startnode: $treeweight, in $(format_seconds_readable(time))."
 
     return (kmst, treeweight)
+
+end
+
+function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int)::Tuple{Vector{Edge{Int}}, Int}
+    time = @elapsed begin
+    skips::Int = 0
+    n::Int= nv(graph)
+    es::Vector{SimpleWeightedEdge} = collect(SimpleWeightedEdge, edges(graph))
+    sort!(es, by=weight)
+
+    intree::Vector{Bool} = zeros(Bool, n)
+    parents::Vector{Int} = zeros(Int, n)
+
+    s::Int = 0
+    d::Int = 0
+    w::Int = 0
+    treeweight::Int = 0
+    treesize::Int = 0
+
+    for e::SimpleWeightedEdge in Iterators.drop(es, n-1)
+        treesize < (k-1) || break  
+
+        s = src(e)
+        d = dst(e)
+
+        if intree[s] && intree[d]
+            skips += 1
+            continue
+        end
+
+        if intree[s] || !intree[d]
+            parents[d] = s
+        else
+            parents[s] = d
+        end
+
+        treesize += 1
+
+        intree[s] = true
+        intree[d] = true
+        treeweight += Int(round(Int,weight(e)))
+    end
+    end
+
+    @debug "Kruskal: $treeweight, in $(format_seconds_readable(time)) with $(skips == 0 ? "no skips" : (skips == 1 ? "1 skip" : "$skips skips"))."
+
+    return ([Edge{Int}(v, parents[v]) for v in vertices(graph) if parents[v] != 0], treeweight)
 
 end

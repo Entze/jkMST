@@ -74,7 +74,9 @@ intermediatetableinterval = 60.0
 printintermediatetable = true
 tablestyle = "text"
 
-include("jkMST.jl")
+@debug "Compiling program."
+includetime = @elapsed include("jkMST.jl")
+@debug "Compiled program in $(format_seconds_readable(includetime))."
 
 main(files=files,
     directories=directories,

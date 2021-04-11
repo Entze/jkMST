@@ -303,13 +303,15 @@ function kMSTs!(;
                         opt = kmstsolutionreport.objective_value
                     end
                     infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
-                    #TODO: write into lines
-
+                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1),colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1)] = line1
+                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2)] = line2
                 end
             end
-            if isnothing(opt)
-                data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = "Unkn."
+            o = "Unkn."
+            if !isnothing(opt)
+                o = opt
             end
+            data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = opt
         end
     end
     pretty_table(data, header, backend=tablebackend)
@@ -330,7 +332,7 @@ function kMST(graph :: SimpleWeightedGraph, mode::SolvingMode, k::Int, solver::S
     end
 
     kmstsolution = solve!(model, graph, k)
-    if printsolutiongraphs
+    if printsolutiongraphs && !isnothing(kmstsolution.solution_graph)
         print_weighted_graph(kmstsolution.solution_graph)
     end
 
@@ -380,7 +382,31 @@ function presolve(graph::SimpleWeightedGraph, k::Int)
 end
 
 function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
-    return ([], 0, typemax(Int))
+
+    calc_time :: Float64 = @elapsed begin
+        lb::Int = 0
+        ub::Int = typemax(Int)
+
+        n::Int = nv(graph)
+        (lbtree, lb) = kruskal_heuristic(graph, k)
+
+        startnodes::Vector{Int} = collect(Int,2:n)
+        shuffle!(startnodes)
+    end
+
+    ubtree::Vector{Edge{Int}} = []
+
+    while calc_time < timeout_sec && !isempty(startnodes)
+        calc_time += @elapsed begin
+            startnode = pop!(startnodes)
+            heur::Union{Tuple{Vector{Edge{Int}}, Int}, Nothing} = prim_heuristic(graph, k, startnode=startnode, upperbound=ub)
+            if !isnothing(heur)
+                (ubtree, ub) = heur
+            end
+        end
+    end
+
+    return (ubtree, lb, ub)
 end
 
 function generate_model(graph::SimpleWeightedGraph,
