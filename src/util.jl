@@ -37,9 +37,15 @@ function format_seconds_readable(seconds, digits=2)::String
     return string(seconds)
 end
 
-function format_ratio_readable(amount :: Number, max:: Number = 1, digits=2)::String
+function format_ratio_readable(amount::Union{Int, Float64}, max::Union{Int, Float64} = 1, digits=2)::String
     fspec = FormatSpec(".$(digits)f")
-    perc::Rational{Number} = amount//max
+    perc::Union{Float64, Rational{Int}} = 0.0
+    if typeof(amount) == Float64
+        perc = amount/max
+    else
+        max::Int
+        perc = amount//max
+    end
     perc *= 100
     if 1//5 <= perc || perc == 0
         return "$(fmt(fspec, perc))%"

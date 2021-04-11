@@ -295,7 +295,9 @@ function kMSTs!(;
                     infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
                     if kmstsolutionreport.termination_status != MOI.OPTIMAL
                         infostring *=  string(RED_FG("Did not find an optimal solution."))
-                        line1 = kmstsolutionreport.objective_value
+                        if !isnothing(kmstsolutionreport.objective_value)
+                            line1 = kmstsolutionreport.objective_value
+                        end
                         line2 = format_ratio_readable(kmstsolutionreport.relative_gap)
                     else
                         line1 = format_seconds_readable(kmstsolutionreport.solve_time_sec)
@@ -305,6 +307,11 @@ function kMSTs!(;
                     infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1),colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1)] = line1
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2)] = line2
+                    currenttime += kmstsolutionreport.solve_time_sec
+                    if printintermediatetable && currenttime > intermediatetableinterval
+                        pretty_table(data, header, backend=tablebackend)
+                        currenttime = 0.0
+                    end
                 end
             end
             o = "Unkn."
@@ -320,7 +327,7 @@ end
 struct KMSTSolutionReport
     termination_status :: MOI.TerminationStatusCode
     objective_value :: Union{Int, Nothing}
-    relative_gap :: Float64
+    relative_gap :: Union{Float64, Nothing}
     solve_time_sec :: Float64
 end
 
@@ -336,7 +343,14 @@ function kMST(graph :: SimpleWeightedGraph, mode::SolvingMode, k::Int, solver::S
         print_weighted_graph(kmstsolution.solution_graph)
     end
 
-    return KMSTSolutionReport(kmstsolution.termination_status, Int(round(Int, kmstsolution.objective_value)), kmstsolution.relative_gap, kmstsolution.solve_time_sec)
+    objective_value :: Union{Int, Float64, Nothing} = kmstsolution.objective_value
+    if objective_value == Inf64
+        objective_value = nothing
+    else
+        objective_value = Int(round(Int, objective_value))
+    end
+
+    return KMSTSolutionReport(kmstsolution.termination_status, objective_value, kmstsolution.relative_gap, kmstsolution.solve_time_sec)
 end
 
 function presolve(graph::SimpleWeightedGraph, k::Int)

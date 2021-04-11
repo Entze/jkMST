@@ -120,10 +120,10 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     end
 
     st :: Float64 = solve_time(model)
-    rg :: Float64 = relative_gap(model)
     if !has_values(model)
-        return KMSTSolution(ts, nothing, Inf64, rg, st)
+        return KMSTSolution(ts, nothing, Inf64, Inf64, st)
     end
+    rg :: Float64 = relative_gap(model)
     n::Int = nv(graph)
     solution_graph::SimpleWeightedGraph = get_solution_graph(model, graph)
     components = connected_components(solution_graph)
