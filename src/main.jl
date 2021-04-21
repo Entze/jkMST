@@ -43,6 +43,30 @@ function parse_cmdargs()
             help = "Maximum time in seconds spent on a single instance (3600s = 1h)."
             default = Inf64
             arg_type = Float64
+        "--no-preprocess-instances"
+            help = "Do not run Kruskal and Prim before solving file inorder to obtain better starting bounds."
+            action = :store_true
+        "--preprocess-timeout"
+            help = "Maximum amount of time spent on preprocessing instances."
+            default = Inf64
+            arg_type = Float64
+        "--no-print-solution-graphs"
+            help = "Suppress the printing of the solution graphs after a solution is found."
+            action = :store_true
+        "--intermediate-table-interval"
+            help = "Set the interval in seconds for printing the table in between instances."
+            default = 60.0
+            arg_type = Float64
+        "--no-print-intermediate-table"
+            help = "Do not print the table in between instances."
+            action = :store_true
+        "--no-print-models"
+            help = "Do not print the models in debug mode."
+            action = :store_true
+        "--table-style"
+            help = "Choose table style. (Allowed values: [\"text\", \"html\", \"latex\"])"
+            default = "text"
+            arg_type = String
         "--verbose", "-v"
             help = "Increase verbosity."
             action = :count_invocations
@@ -60,19 +84,21 @@ quiet = parsed_args["quiet"]
 level = loglevels[max(1, min(4, 2 + (quiet - verbosity)))]
 logger = Logging.ConsoleLogger(stdout, level)
 global_logger(logger)
-@debug "LogLevel: $(Logging.min_enabled_level(logger)), isdebug: $(isdebug())."
+@debug "LogLevel: $(Logging.min_enabled_level(logger)), isdebug: $(isdebug()), threads: $(Base.Threads.nthreads())."
 files = parsed_args["file"]
 directories = parsed_args["directory"]
 modestrings = parsed_args["mode"]
 kstrings = parsed_args["size"]
 solverstrings = parsed_args["solver"]
 timeout = parsed_args["timeout"]
-preprocessinstances = true
-preprocesstimeout = Inf64
-printsolutiongraphs = true
-intermediatetableinterval = 60.0
-printintermediatetable = true
-tablestyle = "text"
+preprocessinstances = !parsed_args["no-preprocess-instances"]
+preprocesstimeout = parsed_args["preprocess-timeout"]
+printsolutiongraphs = !parsed_args["no-print-solution-graphs"]
+intermediatetableinterval = parsed_args["intermediate-table-interval"]
+printintermediatetable = !parsed_args["no-print-intermediate-table"]
+debugmodels = !parsed_args["no-print-models"]
+tablestyle = parsed_args["table-style"]
+
 
 @debug "Compiling program."
 includetime = @elapsed include("jkMST.jl")
@@ -88,6 +114,7 @@ main(files=files,
     preprocesstimeout=preprocesstimeout,
     printsolutiongraphs=printsolutiongraphs,
     printintermediatetable=printintermediatetable,
+    debugmodels=debugmodels,
     intermediatetableinterval=intermediatetableinterval,
     tablestyle=tablestyle
     )

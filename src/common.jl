@@ -74,14 +74,54 @@ function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, so
         d = dst(e)
         if src(e) != 1 && dst(e) != 1
             set_start_value(variable_by_name(model, "x[$r]"), x[r])
-            y_ij = start_value(variable_by_name(model, "y[$s,$d]"))
-            y_ji = start_value(variable_by_name(model, "y[$d,$s]"))
-            if !isnothing(y_ij) && !isnothing(y_ji) && y_ij + y_ji != x[r]
-                @warn "Start values for constraint y[$s,$d] + y[$d,$s] = x[$r] do not hold."
-            end
         end
     end
     set_start_value(variable_by_name(model, "o"), totalweight)
+end
+
+function check_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int) :: Int
+    n :: Int = nv(graph)
+    m :: Int = ne(graph)
+    es :: Vector{SimpleWeightedEdge} = collect(edges(graph))
+    sort!(es, by=dst)
+    sort!(es, by=src, alg=MergeSort)
+    x :: Vector{Union{Nothing,Int}} = fill(nothing, m)
+    y :: Matrix{Union{Nothing,Int}} = fill(nothing, n, n)
+    filled :: Int = 0
+    totalweight :: Int = 0
+    for r in 1:m
+        e = es[r]
+        i = src(e)
+        j = dst(e)
+        x[r] = start_value(variable_by_name(model, "x[$r]"))
+        if x[r] == 1
+            totalweight += Int(round(Int, weight(e)))
+        end
+        y[i, j] = start_value(variable_by_name(model, "y[$i,$j]"))
+        y[j, i] = start_value(variable_by_name(model, "y[$j,$i]"))
+        if isnothing(y[i,j]) && !isnothing(y[j,i]) && !isnothing(x[r])
+            y[i,j] = x[r] - y[j,i]
+            set_start_value(variable_by_name(model, "y[$i,$j]"), y[i,j])
+            filled += 1
+        elseif !isnothing(y[i,j]) && isnothing(y[j,i]) && !isnothing(x[r])
+            y[j,i] = x[r] - y[i,j]
+            set_start_value(variable_by_name(model, "y[$j,$i]"), y[j,i])
+            filled += 1
+        elseif !isnothing(y[i,j]) && !isnothing(y[j,i]) && isnothing(x[r])
+            if 0 <= y[i,j] + y[j,i] <= 1
+                x[r] = y[i,j] + y[j,i]
+                set_start_value(variable_by_name(model, "x[$r]"), x[r])
+                filled += 1
+            else
+                @warn "0 > y[$i,$j] + y[$j,$i] > 1 | ($(y[i,j]) + $(y[j,i]))"
+            end
+        elseif !isnothing(y[i,j]) && !isnothing(y[j,i]) && !isnothing(x[r]) && x[r] != y[i,j] + y[j,i]
+            @warn "x[$r] != y[$i,$j] + y[$j,$i] | ($(x[r]) != $(y[i,j]) + $(y[j,i])"
+        end
+    end
+
+    return filled
+
 end
 
 struct KMSTSolution

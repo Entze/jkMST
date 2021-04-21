@@ -135,6 +135,7 @@ function main(;files::Vector{String}=[],
                 preprocesstimeout::Float64=Inf64,
                 printsolutiongraphs::Bool=true,
                 printintermediatetable::Bool=true,
+                debugmodels::Bool=true,
                 intermediatetableinterval::Float64=60.0,
                 tablestyle::String="text"
                 )
@@ -281,9 +282,9 @@ function kMSTs!(;
             lb::Int = 0
             ub::Int = typemax(Int)
             if preprocessinstances
-                @debug "Preprocessing instance $file."
+                @debug "Preprocessing instance $file ($treesize nodes)."
                 preprocesstime = @elapsed (initialsolution, lb, ub) = preprocess(graph, treesize, preprocesstimeout)
-                @debug "Preprocessed instance $file with lb: $(string(CYAN_FG(string(lb)))), ub: $(string(MAGENTA_FG(string(ub)))), in $(format_seconds_readable(preprocesstime))."
+                @debug "Preprocessed instance $file ($treesize nodes) with lb: $(string(CYAN_FG(string(lb)))), ub: $(string(MAGENTA_FG(string(ub)))), rg: $(string(GREEN_FG(format_ratio_readable(1-(lb/ub))))), in $(format_seconds_readable(preprocesstime))."
             end
             opt::Union{Nothing,Int} = nothing
             for (s, solver) in enumerate(solvers)
@@ -291,24 +292,26 @@ function kMSTs!(;
                     line1::Union{String, Int, Float64} = ""
                     line2::Union{String, Int, Float64} = ""
                     @debug "Starting instance $file, with size $treesize, solver $solver and mode $mode."
-                    kmstsolutionreport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub,printsolutiongraphs=printsolutiongraphs)
+                    kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub,printsolutiongraphs=printsolutiongraphs,debugmodels=debugmodels)
                     infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
                     if kmstsolutionreport.termination_status != MOI.OPTIMAL
                         infostring *=  string(RED_FG("Did not find an optimal solution."))
                         if !isnothing(kmstsolutionreport.objective_value)
                             line1 = kmstsolutionreport.objective_value
                         end
-                        line2 = format_ratio_readable(kmstsolutionreport.relative_gap)
+                        if !isnothing(kmstsolutionreport.relative_gap)
+                            line2 = format_ratio_readable(kmstsolutionreport.relative_gap)
+                        end
                     else
                         line1 = format_seconds_readable(kmstsolutionreport.solve_time_sec)
                         @assert isnothing(opt) || opt == kmstsolutionreport.objective_value "Optimal value changed from $opt to $(kmstsolutionreport.objective_value)."
                         opt = kmstsolutionreport.objective_value
                     end
                     infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
-                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1),colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1)] = line1
+                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1)] = line1
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2)] = line2
                     currenttime += kmstsolutionreport.solve_time_sec
-                    if printintermediatetable && currenttime > intermediatetableinterval
+                    if printintermediatetable && currenttime > intermediatetableinterval && (f != fl || k != kl || s != sl || m != ml)
                         pretty_table(data, header, backend=tablebackend)
                         currenttime = 0.0
                     end
@@ -318,7 +321,7 @@ function kMSTs!(;
             if !isnothing(opt)
                 o = opt
             end
-            data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = opt
+            data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = o
         end
     end
     pretty_table(data, header, backend=tablebackend)
@@ -331,9 +334,19 @@ struct KMSTSolutionReport
     solve_time_sec :: Float64
 end
 
-function kMST(graph :: SimpleWeightedGraph, mode::SolvingMode, k::Int, solver::Solver; timeout_sec::Float64=Inf64, initialsolution :: Union{Vector{Edge{Int}}, Nothing}=nothing, lowerbound::Int=0, upperbound::Int=typemax(Int), printsolutiongraphs::Bool=true) :: KMSTSolutionReport
+function kMST(graph :: SimpleWeightedGraph,
+    mode::SolvingMode,
+    k::Int,
+    solver::Solver
+    ;
+    timeout_sec::Float64=Inf64,
+    initialsolution :: Union{Vector{Edge{Int}}, Nothing}=nothing,
+    lowerbound::Int=0,
+    upperbound::Int=typemax(Int),
+    printsolutiongraphs::Bool=true,
+    debugmodels::Bool=true) :: KMSTSolutionReport
     n::Int = nv(graph) - 1
-    model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound)
+    model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
     if !isnothing(initialsolution) && solver != glpk
         warmstart_model!(model, graph, mode, k, initialsolution)
     end
@@ -396,29 +409,140 @@ function presolve(graph::SimpleWeightedGraph, k::Int)
 end
 
 function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
+    nthreads :: Int = Base.Threads.nthreads()
+    calc_time :: Float64 = 0
 
-    calc_time :: Float64 = @elapsed begin
-        lb::Int = 0
-        ub::Int = typemax(Int)
+    lb::Int = 0
+    ub::Int = typemax(Int)
 
-        n::Int = nv(graph)
-        (lbtree, lb) = kruskal_heuristic(graph, k)
+    n::Int = nv(graph)
 
-        startnodes::Vector{Int} = collect(Int,2:n)
-        shuffle!(startnodes)
+    lbfuture = Base.Threads.@spawn begin
+    checked :: Set{Edge{Int}} = Set()
+    tocheck_lock = Base.ReentrantLock()
+    tocheck :: Vector{Edge{Int}} = []
+    lowerbound_lock = Base.ReentrantLock()
+    (lbtree, lb, s) = kruskal_heuristic(graph, k)
+    append!(tocheck, setdiff(s, checked))
+    for e in lbtree
+        push!(checked, e)
     end
 
-    ubtree::Vector{Edge{Int}} = []
-
-    while calc_time < timeout_sec && !isempty(startnodes)
-        calc_time += @elapsed begin
-            startnode = pop!(startnodes)
-            heur::Union{Tuple{Vector{Edge{Int}}, Int}, Nothing} = prim_heuristic(graph, k, startnode=startnode, upperbound=ub)
-            if !isnothing(heur)
-                (ubtree, ub) = heur
+    while !isempty(tocheck)
+        Threads.@threads for i = 1:max(1,div(nthreads-1,2))
+            if !isempty(tocheck)
+                unskippable = nothing
+                lock(tocheck_lock)
+                try
+                    if !isempty(tocheck)
+                        unskippable = pop!(tocheck)
+                        while unskippable in checked && !isempty(tocheck)
+                            unskippable = pop!(tocheck)
+                        end
+                        if unskippable in checked
+                            unskippable = nothing
+                        end
+                    end
+                finally
+                    unlock(tocheck_lock)
+                end
+                if !isnothing(unskippable)
+                    push!(checked, unskippable)
+                    (lbtreecand, lbcand, s) = kruskal_heuristic(graph, k, unskippable=unskippable, bound=lb)
+                    if !isnothing(lbtreecand)
+                        for e in lbtreecand
+                            push!(checked, e)
+                        end
+                    end
+                    append!(tocheck, setdiff(s, checked))
+                    if lbcand < lb
+                        lock(lowerbound_lock)
+                        try
+                            if lbcand < lb
+                                lbtree = lbtree
+                                lb = lbcand
+                            end
+                        finally
+                            unlock(lowerbound_lock)
+                        end
+                    end
+                    if isempty(s)
+                        lock(tocheck_lock)
+                        try
+                            empty!(tocheck)
+                        finally
+                            unlock(tocheck_lock)
+                        end
+                    end
+                end
             end
         end
     end
+    @assert !isnothing(lbtree) "No lower bound tree found."
+    lb
+    end
+
+
+    ubtree::Vector{Edge{Int}} = []
+
+    startnodes_lock = Base.ReentrantLock()
+    upperbound_lock = Base.ReentrantLock()
+
+    ubfuture = Base.Threads.@spawn begin
+    startnodes::Vector{Int} = collect(Int,2:n)
+    shuffle!(startnodes)
+    checked :: Set{Int} = Set()
+
+    while calc_time < timeout_sec && !isempty(startnodes)
+        calc_time += @elapsed begin
+            Threads.@threads for i = 1:max(1,div(nthreads-1,2)+((nthreads-1)%2))
+                if !isempty(startnodes)
+                    lock(startnodes_lock)
+                    startnode = nothing
+                    try
+                        if !isempty(startnodes)
+                            startnode = pop!(startnodes)
+                            while startnode in checked && !isempty(startnodes)
+                                startnode = pop!(startnodes)
+                            end
+                            if startnode in checked
+                                startnode = nothing
+                            end
+                        end
+                    finally
+                        unlock(startnodes_lock)
+                    end
+                    if !isnothing(startnode)
+                        heur::Union{Tuple{Vector{Edge{Int}}, Int}, Nothing} = prim_heuristic(graph, k, startnode=startnode, upperbound=ub)
+                        if !isnothing(heur)
+                            for e in heur[1]
+                                for v in [src(e), dst(e)]
+                                    push!(checked, v)
+                                end
+                            end
+                            if heur[2] < ub
+                                lock(upperbound_lock)
+                                try
+                                    if heur[2] < ub
+                                        (ubtree, ub) = heur
+                                    end
+                                finally
+                                    unlock(upperbound_lock)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    (ubtree,ub)
+    end
+
+    lb = fetch(lbfuture)
+    (ubtree,ub) = fetch(ubfuture)
+
+    @assert lb <= ub "Lowerbound has to be smaller than upperbound. !($lb < $ub)"
 
     return (ubtree, lb, ub)
 end
@@ -429,7 +553,8 @@ function generate_model(graph::SimpleWeightedGraph,
         solver::Solver;
         timeout_sec::Float64 = Inf64,
         lowerbound::Int = 0,
-        upperbound::Int = typemax(Int))
+        upperbound::Int = typemax(Int),
+        debugmodels::Bool=true)
     model = Model()
     if solver == glpk
         set_optimizer(model, GLPK.Optimizer)
@@ -459,7 +584,9 @@ function generate_model(graph::SimpleWeightedGraph,
     if mode == mtz
         miller_tuckin_zemlin!(model, graph, k)
     end
-    @debug model
+    if debugmodels
+        @debug model
+    end
     return model
 end
 
@@ -467,6 +594,22 @@ function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, 
     basic_kmst_warmstart!(model, graph, k, solution)
     if mode == mtz
         miller_tuckin_zemlin_warmstart!(model, graph, k, solution)
+    end
+
+    filled = check_kmst_warmstart!(model, graph, k)
+
+    if mode == mtz
+        filled += check_miller_tuckin_zemlin_warmstart!(model, graph, k)
+    end
+
+    @debug "Found $filled variable$(filled == 1 ? "" : "s") that could be filled."
+
+    if isdebug()
+        num_vars :: Int = JuMP.num_variables(model)
+        vars :: Vector{VariableRef} = all_variables(model)
+        start_values = start_value.(vars)
+        with_startvalue :: Int = num_vars - count(isnothing, start_values)
+        @debug "Model has $num_vars variables, $with_startvalue ($(format_ratio_readable(with_startvalue, num_vars))) have a start value."
     end
 end
 

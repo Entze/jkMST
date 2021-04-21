@@ -90,7 +90,7 @@ function prim_heuristic(graph::SimpleWeightedGraph,
     end
 
     if treeweight > upperbound
-        @debug "Prim $startnode: >$upperbound after $treesize nodes in $(format_seconds_readable(time))."
+        @debug "Prim $startnode: >$upperbound after $treesize nodes, in $(format_seconds_readable(time))."
         return nothing
     end
 
@@ -102,9 +102,10 @@ function prim_heuristic(graph::SimpleWeightedGraph,
 
 end
 
-function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int)::Tuple{Vector{Edge{Int}}, Int}
+function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int; unskippable::Union{Nothing,Edge{Int}} = nothing, bound::Int = typemax(Int))::Tuple{Union{Vector{Edge{Int}}, Nothing}, Int, Set{Edge{Int}}}
     time = @elapsed begin
     skips::Int = 0
+    skipped :: Set{Edge{Int}} = Set()
     n::Int= nv(graph)
     es::Vector{SimpleWeightedEdge} = collect(SimpleWeightedEdge, edges(graph))
     sort!(es, by=weight)
@@ -118,14 +119,33 @@ function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int)::Tuple{Vector{Edg
     treeweight::Int = 0
     treesize::Int = 0
 
+    if !isnothing(unskippable)
+        s = src(unskippable)
+        d = dst(unskippable)
+        @assert 1 <= s <= n "s: $s is not in [1,n]."
+        @assert 1 <= d <= n "d: $d is not in [1,n]."
+        intree[s] = true
+        intree[d] = true
+        parents[d] = s
+        treesize += 1
+        for e in es
+            (src(e) == s && dst(e) == d) || (src(e) == d && dst(e) == s) || continue
+            treeweight += Int(round(Int, weight(e)))
+        end
+    end
+
+
     for e::SimpleWeightedEdge in Iterators.drop(es, n-1)
         treesize < (k-1) || break  
 
         s = src(e)
         d = dst(e)
 
+        isnothing(unskippable) || !((src(e) == src(unskippable) && dst(e) == dst(unskippable)) || ((src(e) == dst(unskippable) && dst(e) == src(unskippable)))) || continue
+
         if intree[s] && intree[d]
             skips += 1
+            push!(skipped, Edge{Int}(min(s,d), max(s,d)))
             continue
         end
 
@@ -140,11 +160,21 @@ function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int)::Tuple{Vector{Edg
         intree[s] = true
         intree[d] = true
         treeweight += Int(round(Int,weight(e)))
+        if treeweight > bound
+            break
+        end
     end
+    end # time-measuring end
+
+    if treeweight > bound
+        @debug "Kruskal $(src(unskippable))-$(dst(unskippable)): >$bound after $treesize nodes, in $(format_seconds_readable(time)) with $(skips == 0 ? "no skips" : (skips == 1 ? "1 skip" : "$skips skips"))."
+        return (nothing, treeweight, skipped)
     end
 
-    @debug "Kruskal: $treeweight, in $(format_seconds_readable(time)) with $(skips == 0 ? "no skips" : (skips == 1 ? "1 skip" : "$skips skips"))."
+    @assert treesize == k-1 "Tree should have $(k-1) edges but has $treesize."
 
-    return ([Edge{Int}(v, parents[v]) for v in vertices(graph) if parents[v] != 0], treeweight)
+    @debug "Kruskal$(isnothing(unskippable) ? "" : " $(src(unskippable))-$(dst(unskippable))"): $treeweight, in $(format_seconds_readable(time)) with $(skips == 0 ? "no skips" : (skips == 1 ? "1 skip" : "$skips skips"))."
+
+    return ([Edge{Int}(v, parents[v]) for v in vertices(graph) if parents[v] != 0], treeweight, skipped)
 
 end
