@@ -3,6 +3,7 @@ using Logging
 using JuMP
 using LightGraphs, SimpleWeightedGraphs
 using Crayons.Box
+using PrettyTables, Formatting
 
 function value_rounded(v)
     return Int(round(value(v)))
@@ -25,9 +26,9 @@ function basic_kmst!(model,
     sort!(es, by=dst, alg=MergeSort)
     sort!(es, by=src, alg=MergeSort)
     @variables(model,begin
-        y[i=1:n, j=1:n; has_edge(graph, i, j)], (binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
-        x[e=1:m], (binary=true, lower_bound=0, upper_bound=1)
         o, (integer=true, lower_bound=lb, upper_bound=ub)
+        x[e=1:m], (binary=true, lower_bound=0, upper_bound=1)
+        y[i=1:n, j=1:n; has_edge(graph, i, j)], (binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
     end)
 
     for i in 1:m
@@ -132,6 +133,104 @@ struct KMSTSolution
     solve_time_sec :: Float64
 end
 
+function print_variable_table(model, graph :: SimpleWeightedGraph)
+    if !has_values(model)
+        @debug "Cannot print values, model has no values."
+        return
+    end
+    @assert has_values(model) "Model should have values."
+    n::Int= nv(graph)
+    m::Int= ne(graph)
+    es::Vector{SimpleWeightedEdge}= collect(edges(graph))
+    sort!(es, by=dst)
+    sort!(es, by=src, alg=MergeSort)
+
+    all_vars::Vector{VariableRef} = all_variables(model)
+
+    different_variables::Int = 0
+
+    header :: Vector{String} = ["", "1-Vars"]
+    names :: Vector{String} = []
+    multidimvarslines :: Dict{String, Int} = Dict()
+    multidimvarsdims :: Dict{String, Int} = Dict()
+    multilines::Int = 0
+    onevarsline::Int = 1
+    onevarslines::Int = 0
+
+    for var in all_vars
+        name::String = JuMP.name(var)
+
+        delim::Union{Int, Nothing} = findfirst('[', name)
+
+        if isnothing(delim)
+            onevarslines += 1
+        elseif delim > 1
+            basename::String = name[1:(delim-1)]
+            if basename in keys(multidimvarsdims)
+                @assert basename in keys(multidimvarslines) "If basename $basename is in multidimvarsdims it should be in multidimvarslines."
+                @assert basename in names "If basename $basename is in multidimvarsdims it should be in names."
+                multidimvarslines[basename] += 1
+            else
+                @assert !(basename in keys(multidimvarslines)) "If basename $basename is not in multidimvarsdims it should not be in multidimvarslines."
+                @assert !(basename in names) "If basename $basename is in multidimvarsdims it should not be in names."
+                multidimvarslines[basename] = 1
+                multidimvarsdims[basename] = count(v -> v == ',', name) + 1
+                push!(header, "")
+                push!(header, basename)
+                push!(names, basename)
+            end
+            @assert basename in keys(multidimvarslines) "Basename $basename should be present in multidimvarslines"
+            @assert basename in keys(multidimvarsdims) "Basename $basename should be present in multidimvarsdims"
+        end
+    end
+    if !isempty(multidimvarslines)
+        multilines = maximum(values(multidimvarslines))
+    end
+
+    width::Int = length(header)
+    height::Int = max(onevarslines, multilines)
+
+    data::Matrix{Union{String, Int, Float64}} = fill("", height, width)
+
+    onevarslines = 1
+    for k in keys(multidimvarslines)
+        multidimvarslines[k] = 1
+    end
+
+    for var in all_vars
+        name :: String = JuMP.name(var)
+        delim::Union{Int, Nothing} = findfirst('[', name)
+        if isnothing(delim)
+            @assert onevarslines <= height "1-vars exceeds height."
+            data[onevarslines, 1] = name
+            data[onevarslines, 2] = value(var)
+            onevarslines += 1
+        elseif delim > 1
+            basename::String = name[1:(delim-1)]
+            @assert basename in keys(multidimvarslines) "Basename $basename never seen before. Not found in multidimvarslines."
+            dims::String = name[delim:end]
+            @assert basename in names "Basename $basename never seen before. Not found in names."
+            index::Int = filter(v -> v[2] == basename, collect(enumerate(names)))[1][1]
+            @assert 1 <= index * 2 + 1 <= width "$basename index ($index) exceeds width."
+            @assert 1 <= multidimvarslines[basename] <= height "$name exceeds height."
+                data[multidimvarslines[basename], index * 2 + 1] = dims
+            if basename == "x"
+                e = es[parse(Int, dims[2:(end-1)])]
+                data[multidimvarslines[basename], index * 2 + 1] *= " = [$(src(e)),$(dst(e))]"
+            end
+            data[multidimvarslines[basename], index * 2 + 2] = value(var)
+            multidimvarslines[basename] += 1
+        end
+    end
+
+    if height > 45
+        pretty_table(data, header=header, backend=Val(:html))
+    else
+        pretty_table(data, header=header)
+    end
+
+end
+
 function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     ts :: MOI.TerminationStatusCode = MOI.INTERRUPTED
     try
@@ -148,15 +247,11 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
             warning *= " Time limit of $(format_seconds_readable(time_limit_sec(model))) reached."
         elseif ts == MOI.INFEASIBLE
             warning *= " Problem is infeasible."
-            compute_conflict!(model)
-            cs = MOI.get(model, MOI.ConflictStatus())
-            if MOI.CONFLICT_FOUND
-
-            end
         else
             warning *= " $ts"
         end
         @warn warning
+        print_variable_table(model, graph)
     end
 
     st :: Float64 = solve_time(model)
@@ -167,19 +262,23 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     n::Int = nv(graph)
     solution_graph::SimpleWeightedGraph = get_solution_graph(model, graph)
     components = connected_components(solution_graph)
+    bug::Bool = false
     if ne(solution_graph) != k-1
         @error "Solution has wrong number of edges."
         @debug "Should have $(k - 1) edges but has $(ne(solution_graph))."
+        bug = true
     end
     if n - k + 1 != length(components)
         @error "Solution has wrong number of components."
         @debug "Should have $(n - k + 1) components but has $(length(components))."
+        bug = true
     end
     for component in components
         cl::Int = length(component)
         if cl != 1 && cl != k
             @error "Solution is not connected." maxlog=1
             @debug "Should only have components with size 1 or $k but found with size $cl: $(component)."
+            bug = true
         end
     end
     ov::Float64 = objective_value(model)
@@ -187,6 +286,10 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     w::Int = sum(Int(round(Int,weight(e))) for e in edges(solution_graph))
     if w != ovrounded
         @warn "MILP solver claims objective value is $ovrounded ($ov), however got $(w)."
+        bug = true
+    end
+    if bug
+        print_variable_table(model, graph)
     end
     return KMSTSolution(ts, solution_graph, ov, rg, st)
 end

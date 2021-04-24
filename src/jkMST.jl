@@ -12,6 +12,7 @@ include("common.jl")
 include("heuristic.jl")
 include("util.jl")
 include("mtz.jl")
+include("scf.jl")
 
 @enum HeaderName Filename Graphsize Treesize Opt Sol
 
@@ -304,7 +305,7 @@ function kMSTs!(;
                         end
                     else
                         line1 = format_seconds_readable(kmstsolutionreport.solve_time_sec)
-                        @assert isnothing(opt) || opt == kmstsolutionreport.objective_value "Optimal value changed from $opt to $(kmstsolutionreport.objective_value)."
+                        @assert isnothing(opt) || opt == kmstsolutionreport.objective_value "Optimal value changed from $opt to $(kmstsolutionreport.objective_value) at $file with size $(treesize), solver $solver, mode $mode."
                         opt = kmstsolutionreport.objective_value
                     end
                     infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
@@ -312,7 +313,7 @@ function kMSTs!(;
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2)] = line2
                     currenttime += kmstsolutionreport.solve_time_sec
                     if printintermediatetable && currenttime > intermediatetableinterval && (f != fl || k != kl || s != sl || m != ml)
-                        pretty_table(data, header, backend=tablebackend)
+                        pretty_table(data, header=header, backend=Val(tablebackend))
                         currenttime = 0.0
                     end
                 end
@@ -324,7 +325,7 @@ function kMSTs!(;
             data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = o
         end
     end
-    pretty_table(data, header, backend=tablebackend)
+    pretty_table(data, header=header, backend=Val(tablebackend))
 end
 
 struct KMSTSolutionReport
@@ -349,6 +350,40 @@ function kMST(graph :: SimpleWeightedGraph,
     model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
     if !isnothing(initialsolution) && solver != glpk
         warmstart_model!(model, graph, mode, k, initialsolution)
+    elseif isdebug()
+        nvars::Int = num_variables(model)
+        @debug "Model has $nvars variable$(nvars == 1 ? "" : "s")."
+    end
+    if isdebug()
+        constypes ::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
+        ncons::Int = 0
+        debugstring::String = ""
+        numcons::Dict{DataType, Int} = SortedDict()
+        for (reftype, constype) in constypes
+            c::Int = num_constraints(model, reftype, constype)
+            if !(constype in keys(numcons))
+                numcons[constype] = 0
+            end
+            numcons[constype] += c
+
+            ncons += c
+        end
+        for (constype, c) in numcons
+            if constype == MOI.LessThan{Float64}
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type '≤'."
+            elseif constype == MOI.GreaterThan{Float64}
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type '≥'."
+            elseif constype == MOI.EqualTo{Float64}
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type '='."
+            elseif constype == MOI.ZeroOne
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type 'binary'."
+            elseif constype == MOI.Integer
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type 'integer'."
+            else
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type '$constype'."
+            end
+        end
+        @debug "Model has $ncons constraint$(ncons == 1 ? "" : "s")." * debugstring
     end
 
     kmstsolution = solve!(model, graph, k)
@@ -364,48 +399,6 @@ function kMST(graph :: SimpleWeightedGraph,
     end
 
     return KMSTSolutionReport(kmstsolution.termination_status, objective_value, kmstsolution.relative_gap, kmstsolution.solve_time_sec)
-end
-
-function presolve(graph::SimpleWeightedGraph, k::Int)
-    @debug "Presolving instance."
-    totaltime = @elapsed begin
-        n = nv(graph)
-        candidates::Vector{Int} = collect(Int, 2:n)
-        shuffle!(candidates)
-        bestweight = typemax(Int)
-        best = nothing
-        searchtime = 0
-        optimal::Bool = true
-        for c in candidates
-        searchtime += @elapsed begin
-            res = prim_heuristic(graph, k, startnode=c, upperbound=bestweight)
-            if !isnothing(res)
-            (a, w) = res
-            if w < bestweight
-                best = a
-                bestweight = w
-            end
-        end
-            end
-        
-        if searchtime > 9.98
-            optimal = false
-            break;
-        end
-    end
-    end
-    debugstring = "Presolved instance in $(format_seconds_readable(totaltime)) with weight $(bestweight)."
-
-    if optimal
-        debugstring *= " Solution is $(string(GREEN_FG("optimal")))."
-    else
-        debugstring *= " Solution is $(string(RED_FG("suboptimal")))."
-    end
-
-    @debug debugstring
-    sort!(best, by=dst)
-    sort!(best, by=src, alg=MergeSort)
-    return (best, bestweight)
 end
 
 function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
@@ -583,6 +576,8 @@ function generate_model(graph::SimpleWeightedGraph,
     basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
     if mode == mtz
         miller_tuckin_zemlin!(model, graph, k)
+    elseif mode == scf
+        single_commodity_flow!(model, graph, k)
     end
     if debugmodels
         @debug model
@@ -609,7 +604,7 @@ function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, 
         vars :: Vector{VariableRef} = all_variables(model)
         start_values = start_value.(vars)
         with_startvalue :: Int = num_vars - count(isnothing, start_values)
-        @debug "Model has $num_vars variables, $with_startvalue ($(format_ratio_readable(with_startvalue, num_vars))) have a start value."
+        @debug "Model has $num_vars variables, $with_startvalue ($(format_ratio_readable(with_startvalue, num_vars))) $(with_startvalue == 1 ? "has" : "have") a start value."
     end
 end
 

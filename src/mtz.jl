@@ -3,8 +3,8 @@ using JuMP
 using LightGraphs, SimpleWeightedGraphs
 
 function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
-    n :: Int = nv(graph)
-    deg = max(k, n-k) + 1
+    n::Int = nv(graph)
+    deg::Int = max(k, n-k) + 1
     @variables(model, begin
         u[1:n], (integer=true, upper_bound = k+1)
         d[2:n], (integer=true, lower_bound = 0, upper_bound = deg)
@@ -173,6 +173,11 @@ function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGra
                     end
                     set_start_value(variable_by_name(model, "z[$v]"), z[v])
                     filled += 1
+                elseif isnothing(d[v]) && !isnothing(z[v])
+                    if z[v] == 0
+                        d[v] = 0
+                        set_start_value(variable_by_name(model, "d[$v]"), d[v])
+                    end
                 end
             end
         end
