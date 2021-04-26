@@ -7,16 +7,13 @@ function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
     deg::Int = max(k, n-k) + 1
     @variables(model, begin
         u[1:n], (integer=true, upper_bound = k+1)
-        d[2:n], (integer=true, lower_bound = 0, upper_bound = deg)
+        d[2:n], (integer=true, lower_bound = 0, upper_bound = k)
         z[2:n], (binary=true, lower_bound = 0, upper_bound = 1)
     end)
     omega :: Int = 1
-    @constraint(model, u[omega] == 0)
+    fix(u[omega], 0, force=true)
     for i in (omega+1):n
-        @constraints(model, begin
-            u[i] >= 1
-            d[i] <= k
-        end)
+        set_lower_bound(u[i], 1)
         for j in 1:n
             if has_edge(graph, i, j)
                 y_ij = variable_by_name(model, "y[$i,$j]")

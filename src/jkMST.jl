@@ -13,6 +13,7 @@ include("heuristic.jl")
 include("util.jl")
 include("mtz.jl")
 include("scf.jl")
+include("mcf.jl")
 
 @enum HeaderName Filename Graphsize Treesize Opt Sol
 
@@ -146,7 +147,7 @@ function main(;files::Vector{String}=[],
     ml::Int = length(modes)
     ks::Vector{Union{Float64,Int}} = map(s -> begin
         v::Float64 = parse(Float64, s)
-        if v > 1 && v == trunc(Float64, v)
+        if v > 1 && v == trunc(v)
         return Int(trunc(Int, v))
     end
         if !(0 <= v <= 1)
@@ -349,20 +350,23 @@ function kMST(graph :: SimpleWeightedGraph,
     debugmodels::Bool=true) :: KMSTSolutionReport
     n::Int = nv(graph) - 1
     model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
+    nvars::Int = num_variables(model)
     if !isnothing(initialsolution) && solver != glpk
         warmstart_model!(model, graph, mode, k, initialsolution)
     elseif isdebug()
-        nvars::Int = num_variables(model)
         @debug "Model has $nvars variable$(nvars == 1 ? "" : "s")."
     end
     if isdebug()
-        nvars::Int = num_variables(model)
         all_vars::Vector{VariableRef} = all_variables(model)
-        bound::Int = count(v -> is_fixed(v) || (has_lower_bound(v) && has_upper_bound(v)))
+        bound::Int = count(v -> is_fixed(v) || (has_lower_bound(v) && has_upper_bound(v)), all_vars)
         free::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && !has_upper_bound(v), all_vars)
         onlyupperbound::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && has_upper_bound(v), all_vars)
         onlylowerbound::Int = count(v -> !is_fixed(v) && !has_upper_bound(v) && has_lower_bound(v), all_vars)
-        @debug "Model has $bound ($(format_ratio_readable(bound,nvars))) bound variable$(bound == 1 ? "" : "s" ), $free ($(format_ratio_readable(free, nvars))) free variable$(free == 1 ? "" : "s"), $onlylowerbound ($(format_ratio_readable(onlylowerbound, nvars))) variable$(onlylowerbound == 1 ? "" : "s") with no upperbound, $onlyupperbound ($(format_ratio_readable(onlyupperbound, nvars))) variable$(onlyupperbound == 1 ? "" : "s") with no lowerbound."
+        if bound == nvars
+            @debug "Model has no unbound variables."
+        else
+            @debug "Model has $bound ($(format_ratio_readable(bound,nvars))) bound variable$(bound == 1 ? "" : "s" ), $free ($(format_ratio_readable(free, nvars))) free variable$(free == 1 ? "" : "s"), $onlylowerbound ($(format_ratio_readable(onlylowerbound, nvars))) variable$(onlylowerbound == 1 ? "" : "s") with no upperbound, $onlyupperbound ($(format_ratio_readable(onlyupperbound, nvars))) variable$(onlyupperbound == 1 ? "" : "s") with no lowerbound."
+        end
         
         constypes::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
         ncons::Int = 0
@@ -589,6 +593,8 @@ function generate_model(graph::SimpleWeightedGraph,
         miller_tuckin_zemlin!(model, graph, k)
     elseif mode == scf
         single_commodity_flow!(model, graph, k)
+    elseif mode == mcf
+        multi_commodity_flow!(model, graph, k)
     end
     if debugmodels
         @debug model

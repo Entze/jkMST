@@ -36,9 +36,7 @@ function basic_kmst!(model,
         e = es[i]
         s = src(e)
         d = dst(e)
-        if s != 1 && d != 1
-            @constraint(model, y[s, d] + y[d, s] == x[i])
-        end
+        @constraint(model, y[s, d] + y[d, s] == x[i])
     end
 
     @constraints(model, begin
@@ -242,10 +240,16 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     catch e
         @warn "Exception while optimizing. $e"
     end
+    st :: Float64 = solve_time(model)
     if ts != MOI.OPTIMAL
         warning = "Optimizer did not find an optimal solution."
         if ts == MOI.TIME_LIMIT
-            warning *= " Time limit of $(format_seconds_readable(time_limit_sec(model))) reached."
+            tl::Float64 = time_limit_sec(model)
+            warning *= " Time limit of $(format_seconds_readable(tl)) reached"
+            if tl < st
+                warning *= " after $(format_seconds_readable(st)), overdrawn by $(format_seconds_readable(st - tl))"
+            end
+            warning *= "."
         else
             if ts == MOI.INFEASIBLE
                 if lowercase(solver_name(model)) != "cplex"
@@ -280,7 +284,6 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
         @warn warning
     end
 
-    st :: Float64 = solve_time(model)
     if !has_values(model)
         return KMSTSolution(ts, nothing, Inf64, Inf64, st)
     end

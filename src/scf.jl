@@ -5,8 +5,6 @@ using LightGraphs, SimpleWeightedGraphs
 
 function single_commodity_flow!(model, graph :: SimpleWeightedGraph, k :: Int)
     n::Int = nv(graph)
-    m::Int = ne(graph)
-    deg::Int = max(k, n-k)
     es::Vector{SimpleWeightedEdge} = collect(edges(graph))
     sort!(es, by=dst)
     sort!(es, by=src, alg=MergeSort)
