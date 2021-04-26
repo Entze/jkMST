@@ -261,6 +261,7 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
                 for (ref, typ) in constraint_types
                     !(ref == VariableRef && typ == MOI.Integer) || continue
                     !(ref == VariableRef && typ == MOI.ZeroOne) || continue
+                    !(ref == GenericAffExpr{Float64, VariableRef} && typ == MOI.Interval{Float64}) || continue
                     all_cons::Vector{ConstraintRef} = all_constraints(model, ref, typ)
                     @debug "$ref: $typ"
                     for con in all_cons

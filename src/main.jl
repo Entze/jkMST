@@ -50,7 +50,7 @@ function parse_cmdargs()
             help = "Maximum amount of time spent on preprocessing instances."
             default = Inf64
             arg_type = Float64
-        "--no-print-solution-graphs"
+        "--no-print-solution-graphs", "--no-print-solutions"
             help = "Suppress the printing of the solution graphs after a solution is found."
             action = :store_true
         "--intermediate-table-interval"

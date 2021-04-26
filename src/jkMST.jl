@@ -193,6 +193,7 @@ function main(;files::Vector{String}=[],
             preprocesstimeout=preprocesstimeout,
             printintermediatetable=printintermediatetable,
             intermediatetableinterval=intermediatetableinterval,
+            printsolutiongraphs=printsolutiongraphs,
             tablebackend=tablebackend)
     return
 end
@@ -293,7 +294,7 @@ function kMSTs!(;
                     line1::Union{String, Int, Float64} = ""
                     line2::Union{String, Int, Float64} = ""
                     @debug "Starting instance $file, with size $treesize, solver $solver and mode $mode."
-                    kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub,printsolutiongraphs=printsolutiongraphs,debugmodels=debugmodels)
+                    kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub, printsolutiongraphs=printsolutiongraphs, debugmodels=debugmodels)
                     infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
                     if kmstsolutionreport.termination_status != MOI.OPTIMAL
                         infostring *=  string(RED_FG("Did not find an optimal solution."))
@@ -355,7 +356,15 @@ function kMST(graph :: SimpleWeightedGraph,
         @debug "Model has $nvars variable$(nvars == 1 ? "" : "s")."
     end
     if isdebug()
-        constypes ::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
+        nvars::Int = num_variables(model)
+        all_vars::Vector{VariableRef} = all_variables(model)
+        bound::Int = count(v -> is_fixed(v) || (has_lower_bound(v) && has_upper_bound(v)))
+        free::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && !has_upper_bound(v), all_vars)
+        onlyupperbound::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && has_upper_bound(v), all_vars)
+        onlylowerbound::Int = count(v -> !is_fixed(v) && !has_upper_bound(v) && has_lower_bound(v), all_vars)
+        @debug "Model has $bound ($(format_ratio_readable(bound,nvars))) bound variable$(bound == 1 ? "" : "s" ), $free ($(format_ratio_readable(free, nvars))) free variable$(free == 1 ? "" : "s"), $onlylowerbound ($(format_ratio_readable(onlylowerbound, nvars))) variable$(onlylowerbound == 1 ? "" : "s") with no upperbound, $onlyupperbound ($(format_ratio_readable(onlyupperbound, nvars))) variable$(onlyupperbound == 1 ? "" : "s") with no lowerbound."
+        
+        constypes::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
         ncons::Int = 0
         debugstring::String = ""
         numcons::Dict{DataType, Int} = SortedDict()
@@ -379,6 +388,8 @@ function kMST(graph :: SimpleWeightedGraph,
                 debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type 'binary'."
             elseif constype == MOI.Integer
                 debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type 'integer'."
+            elseif constype == MOI.Interval
+                debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type 'interval'."
             else
                 debugstring *= " $c ($(format_ratio_readable(c, ncons))) of type '$constype'."
             end
@@ -604,7 +615,9 @@ function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, 
         vars :: Vector{VariableRef} = all_variables(model)
         start_values = start_value.(vars)
         with_startvalue :: Int = num_vars - count(isnothing, start_values)
-        @debug "Model has $num_vars variables, $with_startvalue ($(format_ratio_readable(with_startvalue, num_vars))) $(with_startvalue == 1 ? "has" : "have") a start value."
+        are_fixed::Int = count(is_fixed, vars)
+        known::Int = count(v -> is_fixed(v) || !isnothing(start_value(v)), vars)
+        @debug "Model has $num_vars variables, $known ($(format_ratio_readable(known, num_vars))) $(known == 1 ? "is" : "are") known, $with_startvalue ($(format_ratio_readable(with_startvalue, num_vars))) $(with_startvalue == 1 ? "has" : "have") a start value, $are_fixed ($(format_ratio_readable(are_fixed, num_vars))) $(are_fixed == 1 ? "is" : "are") fixed."
     end
 end
 

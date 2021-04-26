@@ -1,3 +1,14 @@
 #!/bin/bash
 
+
+if [ -z ${JULIA_NUM_THREADS+x} ]
+then
+    if which lscpu 2>&1 1>/dev/null
+    then
+        CPUS=$(lscpu | grep -E "^CPU\(s\):" | grep -Eo "[0-9]*" 2>/dev/null)
+    fi
+
+    export JULIA_NUM_THREADS=$CPUS
+fi
+
 julia -O3 --project=@. --color=yes -- src/main.jl $@

@@ -12,19 +12,35 @@ function single_commodity_flow!(model, graph :: SimpleWeightedGraph, k :: Int)
     sort!(es, by=src, alg=MergeSort)
 
     @variables(model, begin
-        f[i=1:n, j=1:n; has_edge(graph, i, j)], (lower_bound=0, upper_bound=k)
+        f[i=1:n, j=1:n; has_edge(graph, i, j)], (lower_bound=0)
         z[i=2:n], (binary=true, lower_bound = 0, upper_bound = 1)
     end)
 
     alpha::Int = 1
 
-    for i in (alpha+1):n
-        @constraint(model, 
-        (sum(f[dst(e),i] for e in es if src(e) == i) + sum(f[src(e),i] for e in es if dst(e) == i))
-        - (sum(f[i,dst(e)] for e in es if src(e) == i) + sum(f[i,src(e)] for e in es if dst(e) == i)) == z[i])
-
+    for i in 2:n
+        if has_edge(graph, alpha, i)
+            fix(variable_by_name(model, "y[$i,$alpha]"), 0, force=true)
+            fix(f[i, alpha], 0, force=true)
+            set_upper_bound(f[alpha,i], k)
+        end
+        for j in 2:n
+            if has_edge(graph, i, j)
+                set_upper_bound(f[i,j], k-1)
+                set_upper_bound(f[j,i], k-1)
+            end
+        end
+        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 1:n if has_edge(graph, j, i)) == z[i])
+        #@constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j in 2:n if has_edge(graph, j, i)) <= length(neighbors(graph, i)) - 1)
     end
-    @constraint(model, source_flow, sum(f[alpha,j] for j = 2:n if has_edge(graph, alpha, j)) - sum(f[i,alpha] for i = 2:n if has_edge(graph, i, alpha)) == k)
+
+
+    for i in 2:n
+        @constraint(model,
+        (sum(f[dst(e),i] for e in es if src(e) == i) + sum(f[src(e),i] for e in es if dst(e) == i)
+        - (sum(f[i,dst(e)] for e in es if src(e) == i && dst(e) != alpha) + sum(f[i,src(e)] for e in es if dst(e) == i && src(e) != alpha)) == z[i]))
+    end
+    @constraint(model, source_flow, sum(f[alpha,j] for j = 2:n if has_edge(graph, alpha, j)) == k)
     @constraint(model, one_real_root, sum(variable_by_name(model, "y[$alpha,$j]") for j in 2:n if has_edge(graph, alpha, j)) == 1)
 
     for i in 1:n
@@ -42,11 +58,6 @@ function single_commodity_flow!(model, graph :: SimpleWeightedGraph, k :: Int)
                 end
             end
         end
-    end
-
-    for i in 2:n
-        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 2:n if has_edge(graph, j, i)) <= (length(neighbors(graph, i)) - 1) * z[i]) # z is one if at least one edge goes out
-        # @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 2:n if has_edge(graph, j, i)) >= z[i]) # z is zero if no edges go in
     end
 
     @constraint(model, sum(z[i] for i = 2:n) == k)
