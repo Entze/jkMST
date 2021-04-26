@@ -21,7 +21,6 @@ function format_seconds_readable(seconds, digits=2)::String
         end
         return "$(fmt(fspec, minutes))m"
     else
-        @assert seconds < 0.11
         # Down
         milliseconds = seconds * 1000.0
         if milliseconds < 0.1

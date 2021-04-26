@@ -1,6 +1,7 @@
 
 using Logging
 using JuMP
+import CPLEX
 using LightGraphs, SimpleWeightedGraphs
 using Crayons.Box
 using PrettyTables, Formatting
@@ -245,13 +246,37 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
         warning = "Optimizer did not find an optimal solution."
         if ts == MOI.TIME_LIMIT
             warning *= " Time limit of $(format_seconds_readable(time_limit_sec(model))) reached."
-        elseif ts == MOI.INFEASIBLE
-            warning *= " Problem is infeasible."
         else
-            warning *= " $ts"
+            if ts == MOI.INFEASIBLE
+                if lowercase(solver_name(model)) != "cplex"
+                    @debug "Setting optimizer from $(solver_name(model)) to CPLEX."
+                    set_optimizer(model, CPLEX.Optimizer)
+                end
+                compute_conflict!(model)
+            
+                constraint_types::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
+
+                debugstring::String = "Following constraints are part of the conflict:"
+            
+                for (ref, typ) in constraint_types
+                    !(ref == VariableRef && typ == MOI.Integer) || continue
+                    !(ref == VariableRef && typ == MOI.ZeroOne) || continue
+                    all_cons::Vector{ConstraintRef} = all_constraints(model, ref, typ)
+                    @debug "$ref: $typ"
+                    for con in all_cons
+                        if MOI.get(model.moi_backend, MOI.ConstraintConflictStatus(), con.index) != MOI.NOT_IN_CONFLICT
+                            debugstring *= "\n$con"
+                        end
+                    end
+                end
+                warning *= " Problem is infeasible."
+                @debug debugstring
+            else
+                warning *= " $ts"
+            end
+            print_variable_table(model, graph)
         end
         @warn warning
-        print_variable_table(model, graph)
     end
 
     st :: Float64 = solve_time(model)
