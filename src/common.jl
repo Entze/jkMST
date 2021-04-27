@@ -1,42 +1,60 @@
 
 using Logging
-using JuMP
-import CPLEX
+using JuMP, CPLEX
 using LightGraphs, SimpleWeightedGraphs
-using Crayons.Box
-using PrettyTables, Formatting
+using PrettyTables, Formatting, ProgressMeter, Crayons.Box
 
 function value_rounded(v)
-    return Int(round(value(v)))
+    return round(Int, value(v))
 end
 
 function basic_kmst!(model,
         graph :: SimpleWeightedGraph,
         k :: Int;
         lowerbound :: Int = typemin(Int),
-        upperbound :: Int = typemax(Int))
+        upperbound :: Int = typemax(Int),
+        isdebug=false)
     n :: Int = nv(graph)
     m :: Int = ne(graph)
+    progress::Progress = Progress(1 + m + 2 * m + m + 3 + 1,
+                                    dt=0.5,
+                                    barglyphs=BarGlyphs('[', '#', ['-','~','+','*','=','>','#'], ' ', ']'),
+                                    enabled=isdebug)
     es = collect(SimpleWeightedEdge, edges(graph))
     sort!(es, by=weight)
 
-    lb = max(sum(Int(round(weight(e))) for e in Iterators.take(Iterators.drop(es, n-1), k-1)), lowerbound)
-    ub = min(sum(Int(round(weight(e))) for e in Iterators.drop(es, n-(k-1))), upperbound)
-    @debug "Objective has $(string(CYAN_FG(string(lb)))) as natural lowerbound."
-    @debug "Objective has $(string(MAGENTA_FG(string(ub)))) as natural upperbound."
+    lb::Int = sum(round(Int, weight(e)) for e in Iterators.take(Iterators.drop(es, n-1), k-1))
+    if lb > lowerbound
+        @debug "Objective has $(string(CYAN_FG(string(lb)))) as natural lowerbound."
+    end
+    lb = max(lb, lowerbound)
+    ub::Int = sum(round(Int, weight(e)) for e in Iterators.drop(es, n-(k-1)))
+    if ub < upperbound
+        @debug "Objective has $(string(MAGENTA_FG(string(ub)))) as natural upperbound."
+    end
+    ub = min(ub, upperbound)
     sort!(es, by=dst, alg=MergeSort)
     sort!(es, by=src, alg=MergeSort)
-    @variables(model,begin
-        o, (integer=true, lower_bound=lb, upper_bound=ub)
-        x[e=1:m], (binary=true, lower_bound=0, upper_bound=1)
-        y[i=1:n, j=1:n; has_edge(graph, i, j)], (binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
-    end)
+    @variable(model, o, Int, lower_bound=lb, upper_bound=ub)
+    next!(progress)
+    @variable(model, x[e=1:m], Bin, lower_bound=0, upper_bound=1)
+    ProgressMeter.update!(progress, m)
+    y::Dict{Tuple{Int,Int}, VariableRef} = Dict{Tuple{Int,Int}, VariableRef}()
+    for e in es
+        i::Int = src(e)
+        j::Int = dst(e)
+        y[i,j] = @variable(model, base_name="y[$i,$j]", binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
+        next!(progress)
+        y[j,i] = @variable(model, base_name="y[$j,$i]", binary=true, lower_bound=0, upper_bound=1) 
+        next!(progress)
+    end
 
     for i in 1:m
         e = es[i]
         s = src(e)
         d = dst(e)
         @constraint(model, y[s, d] + y[d, s] == x[i])
+        next!(progress)
     end
 
     @constraints(model, begin
@@ -44,7 +62,10 @@ function basic_kmst!(model,
         sum(x[i] for i in 1:m if src(es[i]) != 1 && dst(es[i]) != 1) == k-1
         sum(x[e] * Int(round(Int, weight(es[e]))) for e in 1:m) == o
     end)
+    ProgressMeter.update!(progress, 3)
     @objective(model, Min, o)
+    next!(progress)
+    finish!(progress)
 end
 
 function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, solution :: Vector{Edge{Int}})

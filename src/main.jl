@@ -43,6 +43,10 @@ function parse_cmdargs()
             help = "Maximum time in seconds spent on a single instance (3600s = 1h)."
             default = Inf64
             arg_type = Float64
+        "--generate-timeout"
+            help = "Maximum time in seconds spent on generating a model (600s = 10m, 3600s = 1h)."
+            default = Inf64
+            arg_type = Float64
         "--no-preprocess-instances"
             help = "Do not run Kruskal and Prim before solving file inorder to obtain better starting bounds."
             action = :store_true
@@ -91,6 +95,7 @@ modestrings = parsed_args["mode"]
 kstrings = parsed_args["size"]
 solverstrings = parsed_args["solver"]
 timeout = parsed_args["timeout"]
+generate_timeout = parsed_args["generate-timeout"]
 preprocessinstances = !parsed_args["no-preprocess-instances"]
 preprocesstimeout = parsed_args["preprocess-timeout"]
 printsolutiongraphs = !parsed_args["no-print-solution-graphs"]
@@ -110,6 +115,7 @@ main(files=files,
     kstrings=kstrings,
     solverstrings=solverstrings,
     timeout_sec=timeout,
+    generate_timeout_sec=generate_timeout,
     preprocessinstances=preprocessinstances,
     preprocesstimeout=preprocesstimeout,
     printsolutiongraphs=printsolutiongraphs,

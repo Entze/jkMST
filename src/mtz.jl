@@ -4,7 +4,6 @@ using LightGraphs, SimpleWeightedGraphs
 
 function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
     n::Int = nv(graph)
-    deg::Int = max(k, n-k) + 1
     @variables(model, begin
         u[1:n], (integer=true, upper_bound = k+1)
         d[2:n], (integer=true, lower_bound = 0, upper_bound = k)
@@ -18,7 +17,7 @@ function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
             if has_edge(graph, i, j)
                 y_ij = variable_by_name(model, "y[$i,$j]")
                 @constraint(model,
-                    u[i] >= u[j] + y_ij - deg * (1 - y_ij)
+                    u[i] >= u[j] + y_ij - k * (1 - y_ij)
                 )
             end
         end
@@ -101,7 +100,6 @@ end
 function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int) :: Int
     n :: Int = nv(graph)
     m :: Int = ne(graph)
-    deg = max(k, n-k) + 1
     es :: Vector{SimpleWeightedEdge} = collect(edges(graph))
     sort!(es, by=dst)
     sort!(es, by=src, alg=MergeSort)
@@ -113,9 +111,9 @@ function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGra
     filled :: Int = 0
     totalweight :: Int = 0
     for r in 1:m
-        e = es[r]
-        i = src(e)
-        j = dst(e)
+        e::SimpleWeightedEdge = es[r]
+        i::Int = src(e)
+        j::Int = dst(e)
         x[r] = start_value(variable_by_name(model, "x[$r]"))
         if x[r] == 1
             totalweight += Int(round(Int,weight(e)))
@@ -136,25 +134,6 @@ function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGra
         end
         y[i, j] = start_value(variable_by_name(model, "y[$i,$j]"))
         y[j, i] = start_value(variable_by_name(model, "y[$j,$i]"))
-        if isnothing(y[i,j]) && !isnothing(y[j,i]) && !isnothing(x[r])
-            y[i,j] = x[r] - y[j,i]
-            set_start_value(variable_by_name(model, "y[$i,$j]"), y[i,j])
-            filled += 1
-        elseif !isnothing(y[i,j]) && isnothing(y[j,i]) && !isnothing(x[r])
-            y[j,i] = x[r] - y[i,j]
-            set_start_value(variable_by_name(model, "y[$j,$i]"), y[j,i])
-            filled += 1
-        elseif !isnothing(y[i,j]) && !isnothing(y[j,i]) && isnothing(x[r])
-            if 0 <= y[i,j] + y[j,i] <= 1
-                x[r] = y[i,j] + y[j,i]
-                set_start_value(variable_by_name(model, "x[$r]"), x[r])
-                filled += 1
-            else
-                @warn "0 > y[$i,$j] + y[$j,$i] > 1 | ($(y[i,j]) + $(y[j,i]))"
-            end
-        elseif !isnothing(y[i,j]) && !isnothing(y[j,i]) && !isnothing(x[r]) && x[r] != y[i,j] + y[j,i]
-            @warn "x[$r] != y[$i,$j] + y[$j,$i] | ($(x[r]) != $(y[i,j]) + $(y[j,i])"
-        end
 
         for v in [i,j]
             if v != 1
@@ -184,8 +163,8 @@ function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGra
         if !isnothing(u[i])
             for j in 2:n
                 if !isnothing(u[j]) && !isnothing(y[i,j]) && has_edge(graph, i, j)
-                    if u[i] < u[j] + y[i,j] - deg * (1 - y[i,j])
-                        @warn "u[$i] < u[$j] + y[$i,$j] - deg * (1 - y[$i,$j]) | ($(u[i]) < $(u[j]) + $(y[i,j]) - $deg * (1 - $(y[i,j])))"
+                    if u[i] < u[j] + y[i,j] - k * (1 - y[i,j])
+                        @warn "u[$i] < u[$j] + y[$i,$j] - k * (1 - y[$i,$j]) | ($(u[i]) < $(u[j]) + $(y[i,j]) - $deg * (1 - $(y[i,j])))"
                     end
                 end
             end

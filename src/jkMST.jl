@@ -133,6 +133,7 @@ function main(;files::Vector{String}=[],
                 kstrings::Vector{String}=["1.0"],
                 solverstrings::Vector{String}=["cplex"],
                 timeout_sec::Float64=Inf64,
+                generate_timeout_sec::Float64=Inf64,
                 preprocessinstances::Bool=true,
                 preprocesstimeout::Float64=Inf64,
                 printsolutiongraphs::Bool=true,
@@ -188,6 +189,7 @@ function main(;files::Vector{String}=[],
             modes=modes,
             ml=ml,
             timeout_sec=timeout_sec,
+            generate_timeout_sec=generate_timeout_sec,
             header=header,
             data=data,
             preprocessinstances=preprocessinstances,
@@ -259,6 +261,7 @@ function kMSTs!(;
     modes::Vector{SolvingMode} = [],
     ml::Int=length(modes),
     timeout_sec::Float64 = Inf64,
+    generate_timeout_sec::Float64 = Inf64,
     header::Vector{String}=[],
     data::Matrix{Union{String, Int, Float64}}=[],
     preprocessinstances::Bool=true,
@@ -295,7 +298,7 @@ function kMSTs!(;
                     line1::Union{String, Int, Float64} = ""
                     line2::Union{String, Int, Float64} = ""
                     @debug "Starting instance $file, with size $treesize, solver $solver and mode $mode."
-                    kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub, printsolutiongraphs=printsolutiongraphs, debugmodels=debugmodels)
+                    kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, generate_timeout_sec=generate_timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub, printsolutiongraphs=printsolutiongraphs, debugmodels=debugmodels)
                     infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
                     if kmstsolutionreport.termination_status != MOI.OPTIMAL
                         infostring *=  string(RED_FG("Did not find an optimal solution."))
@@ -343,28 +346,35 @@ function kMST(graph :: SimpleWeightedGraph,
     solver::Solver
     ;
     timeout_sec::Float64=Inf64,
+    generate_timeout_sec::Float64=Inf64,
     initialsolution :: Union{Vector{Edge{Int}}, Nothing}=nothing,
     lowerbound::Int=0,
     upperbound::Int=typemax(Int),
     printsolutiongraphs::Bool=true,
     debugmodels::Bool=true) :: KMSTSolutionReport
     n::Int = nv(graph) - 1
-    model = generate_model(graph, mode, k, solver,timeout_sec=timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
+    prelude_time::Float64 = 0
+    prelude_time += @elapsed begin 
+        model = generate_model(graph, mode, k, solver, timeout_sec=timeout_sec, generate_timeout_sec=generate_timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
+    end
+    if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
+        return KMSTSolutionReport(MOI.TIME_LIMIT, nothing, nothing, prelude_time)
+    end
     nvars::Int = num_variables(model)
     if !isnothing(initialsolution) && solver != glpk
-        warmstart_model!(model, graph, mode, k, initialsolution)
+        prelude_time += @elapsed warmstart_model!(model, graph, mode, k, initialsolution)
     elseif isdebug()
         @debug "Model has $nvars variable$(nvars == 1 ? "" : "s")."
     end
     if isdebug()
         all_vars::Vector{VariableRef} = all_variables(model)
         bound::Int = count(v -> is_fixed(v) || (has_lower_bound(v) && has_upper_bound(v)), all_vars)
-        free::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && !has_upper_bound(v), all_vars)
-        onlyupperbound::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && has_upper_bound(v), all_vars)
-        onlylowerbound::Int = count(v -> !is_fixed(v) && !has_upper_bound(v) && has_lower_bound(v), all_vars)
         if bound == nvars
             @debug "Model has no unbound variables."
         else
+            free::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && !has_upper_bound(v), all_vars)
+            onlyupperbound::Int = count(v -> !is_fixed(v) && !has_lower_bound(v) && has_upper_bound(v), all_vars)
+            onlylowerbound::Int = count(v -> !is_fixed(v) && !has_upper_bound(v) && has_lower_bound(v), all_vars)
             @debug "Model has $bound ($(format_ratio_readable(bound,nvars))) bound variable$(bound == 1 ? "" : "s" ), $free ($(format_ratio_readable(free, nvars))) free variable$(free == 1 ? "" : "s"), $onlylowerbound ($(format_ratio_readable(onlylowerbound, nvars))) variable$(onlylowerbound == 1 ? "" : "s") with no upperbound, $onlyupperbound ($(format_ratio_readable(onlyupperbound, nvars))) variable$(onlyupperbound == 1 ? "" : "s") with no lowerbound."
         end
         
@@ -400,6 +410,11 @@ function kMST(graph :: SimpleWeightedGraph,
         end
         @debug "Model has $ncons constraint$(ncons == 1 ? "" : "s")." * debugstring
     end
+    if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
+        KMSTSolutionReport(MOI.TIME_LIMIT, nothing, nothing, prelude_time)
+    end
+
+    @debug "Generated model in $(format_seconds_readable(prelude_time))."
 
     kmstsolution = solve!(model, graph, k)
     if printsolutiongraphs && !isnothing(kmstsolution.solution_graph)
@@ -560,6 +575,7 @@ function generate_model(graph::SimpleWeightedGraph,
         k::Int,
         solver::Solver;
         timeout_sec::Float64 = Inf64,
+        generate_timeout_sec::Float64 = Inf64,
         lowerbound::Int = 0,
         upperbound::Int = typemax(Int),
         debugmodels::Bool=true)
@@ -587,16 +603,23 @@ function generate_model(graph::SimpleWeightedGraph,
         end
         set_time_limit_sec(model, timeout)
     end
-
-    basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound)
+    generate_time::Float64 = 0
+    @debug "Generating common variables."
+    generate_time += @elapsed basic_kmst!(model, graph, k, lowerbound=lowerbound, upperbound=upperbound, isdebug=isdebug())
+    if generate_time > generate_timeout_sec + 1.0
+        return model
+    end
+    generate_time += @elapsed begin
+    @debug "Generating $mode variables."
     if mode == mtz
         miller_tuckin_zemlin!(model, graph, k)
     elseif mode == scf
         single_commodity_flow!(model, graph, k)
     elseif mode == mcf
-        multi_commodity_flow!(model, graph, k)
+        multi_commodity_flow!(model, graph, k, generate_timeout_sec=generate_timeout_sec-generate_time, isdebug=isdebug())
     end
-    if debugmodels
+    end
+    if debugmodels && generate_time < generate_timeout_sec + 1.0
         @debug model
     end
     return model
@@ -641,7 +664,10 @@ function read_file_as_simplegraph(path::String)
                     graph = SimpleWeightedGraph(vertexsize)
                 else
                     edgesize = parse(Int, line)
-                    edgeProg = Progress(edgesize, dt=0.5, desc="Parsing edges:", enabled=isdebug())
+                    edgeProg = Progress(edgesize, dt=0.5,
+                    barglyphs=BarGlyphs('[', '#', ['-','~','+','*','=','>','#'], ' ', ']'),
+                    desc="Parsing edges:",
+                    enabled=isdebug())
                 end
             else
                 elemsstrings = split(line, " ", limit=4)
