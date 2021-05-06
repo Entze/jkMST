@@ -151,6 +151,7 @@ struct KMSTSolution
     objective_value :: Float64
     relative_gap :: Float64
     solve_time_sec :: Float64
+    bnb_nodes :: Union{Int, Nothing}
 end
 
 function print_variable_table(model, graph :: SimpleWeightedGraph)
@@ -253,14 +254,10 @@ end
 
 function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     ts :: MOI.TerminationStatusCode = MOI.INTERRUPTED
-    try
-        @debug "Starting to optimize."
-        optimizationtime = @elapsed optimize!(model)
-        @debug "Finished optimizing in $(format_seconds_readable(optimizationtime, 2))."
-        ts = termination_status(model)
-    catch e
-        @warn "Exception while optimizing. $e"
-    end
+    @debug "Starting to optimize."
+    optimizationtime = @elapsed optimize!(model)
+    @debug "Finished optimizing in $(format_seconds_readable(optimizationtime, 2))."
+    ts = termination_status(model)
     st :: Float64 = solve_time(model)
     if ts != MOI.OPTIMAL
         warning = "Optimizer did not find an optimal solution."
@@ -271,6 +268,8 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
                 warning *= " after $(format_seconds_readable(st)), overdrawn by $(format_seconds_readable(st - tl))"
             end
             warning *= "."
+        elseif ts == MOI.MEMORY_LIMIT
+            warning *= " Memory limit reached."
         else
             if ts == MOI.INFEASIBLE
                 if lowercase(solver_name(model)) != "cplex"
@@ -305,10 +304,14 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
         @warn warning
     end
 
-    if !has_values(model)
-        return KMSTSolution(ts, nothing, Inf64, Inf64, st)
+    bnbn::Union{Nothing, Int} = nothing
+    if lowercase(solver_name(model)) == "cplex"
+        bnbn = node_count(model)
     end
-    rg :: Float64 = relative_gap(model)
+    if !has_values(model)
+        return KMSTSolution(ts, nothing, Inf64, Inf64, st, bnbn)
+    end
+    rg::Float64 = relative_gap(model)
     n::Int = nv(graph)
     solution_graph::SimpleWeightedGraph = get_solution_graph(model, graph)
     components = connected_components(solution_graph)
@@ -341,7 +344,7 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     if bug
         print_variable_table(model, graph)
     end
-    return KMSTSolution(ts, solution_graph, ov, rg, st)
+    return KMSTSolution(ts, solution_graph, ov, rg, st, bnbn)
 end
 
 function get_solution_graph(model, graph :: SimpleWeightedGraph)

@@ -31,7 +31,7 @@ function parse_cmdargs()
             arg_type = String
         "--size", "-k"
             help = "Size of the k-MST. If k ∈ [0,1] interpreted as fraction of |V|. If k > 1 interpreted as absolute value. Every instance is solved with every argument."
-            required = true
+            default = ["1"]
             nargs = '+'
             arg_type = String
         "--solver", "-s"
@@ -71,6 +71,9 @@ function parse_cmdargs()
             help = "Choose table style. (Allowed values: [\"text\", \"html\", \"latex\"])"
             default = "text"
             arg_type = String
+        "--system-info"
+            help = "Display what properties the system detects."
+            action = :store_true
         "--verbose", "-v"
             help = "Increase verbosity."
             action = :count_invocations
@@ -83,6 +86,58 @@ function parse_cmdargs()
 end
 
 parsed_args = parse_cmdargs()
+
+system_info = parsed_args["system-info"]
+
+
+function test_system()
+    rng = MersenneTwister()
+
+    ops::Int = 10^7
+    flops::Int = ops * 4
+    operation_time::Float64 = 0.0
+        for j in 1:ops
+            s = rand(rng, Float64)
+            m = rand(rng, Float64)
+            operation_time += @elapsed r = m * s
+            operation_time += @elapsed r = r - m
+            operation_time += @elapsed r = s / m
+            operation_time += @elapsed r = 5.0 + m
+    end
+
+    flopss = flops/operation_time
+    prefix = ""
+    if flopss > 1000
+        prefix = "Kilo"
+        flopss /= 1000
+        if flopss > 1000
+            prefix = "Mega"
+            flopss /= 1000
+            if flopss > 1000
+                prefix = "Giga"
+                flopss /= 1000
+                if flopss > 1000
+                    prefix = "Terra"
+                    flopss /= 1000
+                    if flopss > 1000
+                        prefix = "Peta"
+                        flopss /= 1000
+                    end
+                end
+            end
+        end
+    end
+
+    @info "CPUs: $(Base.Sys.CPU_THREADS) Threads: $(Base.Threads.nthreads()), estimated FLOPS: $(round(flopss; digits = 2)) $(prefix) FLOP/s, Total memory: $(round(Int,Base.Sys.total_memory() // 2^20)) MiB, Free memory: $(round(Int, Base.Sys.free_memory() // 2^20)) MiB"
+    
+end
+
+if system_info
+    using Random, Dates
+    test_system()
+    exit(0)
+end
+
 verbosity = parsed_args["verbose"]
 quiet = parsed_args["quiet"]
 level = loglevels[max(1, min(4, 2 + (quiet - verbosity)))]
@@ -104,6 +159,9 @@ printintermediatetable = !parsed_args["no-print-intermediate-table"]
 debugmodels = !parsed_args["no-print-models"]
 tablestyle = parsed_args["table-style"]
 
+if isempty(files) && isempty(directories)
+    exit()
+end
 
 @debug "Compiling program."
 includetime = @elapsed include("jkMST.jl")

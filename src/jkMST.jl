@@ -78,21 +78,22 @@ function rowoftable(name::HeaderName;
                     sols::Union{Int, Nothing}=nothing,
                     sol::Union{Int, Nothing}=nothing,
                     line::Union{Int, Nothing}=nothing)
+    lines = 4
     if name == Filename || name == Graphsize
         @assert !isnothing(f) "f is not defined."
         @assert !isnothing(ks) "ks is not defined."
-        return 1 + (f - 1) * ks * 2
+        return 1 + (f - 1) * ks * lines
     elseif name == Treesize || name == Opt
         @assert !isnothing(f) "f is not defined."
         @assert !isnothing(ks) "ks is not defined."
         @assert !isnothing(k) "k is not defined."
-        return 1 + (f - 1) * ks * 2 + (k - 1) * 2
+        return 1 + (f - 1) * ks * lines + (k - 1) * lines
     elseif name == Sol
         @assert !isnothing(f) "f is not defined."
         @assert !isnothing(ks) "ks is not defined."
         @assert !isnothing(k) "k is not defined."
         @assert !isnothing(line) "line is not defined."
-        return 1 + (f - 1) * ks * 2 + (k - 1) * 2 + (line - 1)
+        return 1 + (f - 1) * ks * lines + (k - 1) * lines + (line - 1)
     else
         @assert false "Defensive assert: Illegal case."
     end
@@ -241,7 +242,8 @@ function generatetable(;files::Vector{String}=[],
     else
         append!(header, modestrings)
     end
-    data::Matrix{Union{String, Int, Float64}} = fill("", fl * kl * 2, length(header))
+    lines = 4
+    data::Matrix{Union{String, Int, Float64}} = fill("", fl * kl * lines, length(header))
     for (f, file) in enumerate(files)
         data[rowot(Filename, f=f, ks=kl), colot(Filename)] = file
         for (k, size) in enumerate(ks)
@@ -297,11 +299,13 @@ function kMSTs!(;
                 for (m, mode) in enumerate(modes)
                     line1::Union{String, Int, Float64} = ""
                     line2::Union{String, Int, Float64} = ""
+                    line3::Union{String, Int, Float64} = ""
+                    line4::Union{String, Int, Float64} = ""
                     @debug "Starting instance $file, with size $treesize, solver $solver and mode $mode."
                     kmstsolutionreport :: KMSTSolutionReport = kMST(graph, mode, treesize, solver, timeout_sec=timeout_sec, generate_timeout_sec=generate_timeout_sec, initialsolution=initialsolution, lowerbound=lb, upperbound=ub, printsolutiongraphs=printsolutiongraphs, debugmodels=debugmodels)
-                    infostring = "Solved instance $file, with size $size, solver $solver and mode $mode."
+                    infostring = "Solved instance $file, with size $treesize, solver $solver and mode $mode."
                     if kmstsolutionreport.termination_status != MOI.OPTIMAL
-                        infostring *=  string(RED_FG("Did not find an optimal solution."))
+                        infostring *=  " " * string(RED_FG("Did not find an optimal solution."))
                         if !isnothing(kmstsolutionreport.objective_value)
                             line1 = kmstsolutionreport.objective_value
                         end
@@ -313,14 +317,27 @@ function kMSTs!(;
                         @assert isnothing(opt) || opt == kmstsolutionreport.objective_value "Optimal value changed from $opt to $(kmstsolutionreport.objective_value) at $file with size $(treesize), solver $solver, mode $mode."
                         opt = kmstsolutionreport.objective_value
                     end
-                    infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)."
+                    infostring *= " In $(format_seconds_readable(kmstsolutionreport.solve_time_sec)), with weight $(kmstsolutionreport.objective_value)"
+                    if !isnothing(kmstsolutionreport.bnb_nodes)
+                        line3 = kmstsolutionreport.bnb_nodes
+                        infostring *= ", with $(kmstsolutionreport.bnb_nodes) BNB node$(kmstsolutionreport.bnb_nodes == 1 ? "" : "s")"
+                    end
+                    if !isnothing(kmstsolutionreport.violated_ineq)
+                        line4 = kmstsolutionreport.violated_ineq
+                        infostring *= ", with $(kmstsolutionreport.violated_ineq) violated inequalit$(kmstsolutionreport.bnb_nodes == 1 ? "y" : "ies")"
+                    end
+                    infostring *= "."
+                    @info infostring
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=1)] = line1
                     data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=2)] = line2
+                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=3), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=3)] = line3
+                    data[rowot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=4), colot(Sol, f=f, k=k, ks=kl, sol=s, sols=sl, m=m, ms=ml, line=4)] = line4
                     currenttime += kmstsolutionreport.solve_time_sec
                     if printintermediatetable && currenttime > intermediatetableinterval && (f != fl || k != kl || s != sl || m != ml)
                         pretty_table(data, header=header, backend=Val(tablebackend))
                         currenttime = 0.0
                     end
+                    Base.GC.gc()
                 end
             end
             o = "Unkn."
@@ -338,6 +355,8 @@ struct KMSTSolutionReport
     objective_value :: Union{Int, Nothing}
     relative_gap :: Union{Float64, Nothing}
     solve_time_sec :: Float64
+    bnb_nodes :: Union{Int, Nothing}
+    violated_ineq :: Union{Int, Nothing}
 end
 
 function kMST(graph :: SimpleWeightedGraph,
@@ -358,7 +377,7 @@ function kMST(graph :: SimpleWeightedGraph,
         model = generate_model(graph, mode, k, solver, timeout_sec=timeout_sec, generate_timeout_sec=generate_timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
     end
     if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
-        return KMSTSolutionReport(MOI.TIME_LIMIT, nothing, nothing, prelude_time)
+        return KMSTSolutionReport(MOI.TIME_LIMIT, upperbound, 1-(lowerbound/upperbound), prelude_time, 0, nothing)
     end
     nvars::Int = num_variables(model)
     if !isnothing(initialsolution) && solver != glpk
@@ -410,11 +429,15 @@ function kMST(graph :: SimpleWeightedGraph,
         end
         @debug "Model has $ncons constraint$(ncons == 1 ? "" : "s")." * debugstring
     end
-    if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
-        KMSTSolutionReport(MOI.TIME_LIMIT, nothing, nothing, prelude_time)
-    end
 
     @debug "Generated model in $(format_seconds_readable(prelude_time))."
+    if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
+        return KMSTSolutionReport(MOI.TIME_LIMIT, upperbound, 1-(lowerbound/upperbound), prelude_time, 0, nothing)
+    end
+
+    if mode == mcf && n >= 205
+        return KMSTSolutionReport(MOI.MEMORY_LIMIT, upperbound, 1-(lowerbound/upperbound), prelude_time, 0, nothing)
+    end
 
     kmstsolution = solve!(model, graph, k)
     if printsolutiongraphs && !isnothing(kmstsolution.solution_graph)
@@ -428,7 +451,7 @@ function kMST(graph :: SimpleWeightedGraph,
         objective_value = Int(round(Int, objective_value))
     end
 
-    return KMSTSolutionReport(kmstsolution.termination_status, objective_value, kmstsolution.relative_gap, kmstsolution.solve_time_sec)
+    return KMSTSolutionReport(kmstsolution.termination_status, objective_value, kmstsolution.relative_gap, kmstsolution.solve_time_sec, kmstsolution.bnb_nodes, nothing)
 end
 
 function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
@@ -602,6 +625,15 @@ function generate_model(graph::SimpleWeightedGraph,
             error("Timeout should be positive")
         end
         set_time_limit_sec(model, timeout)
+    end
+    if solver == cplex 
+        available_memory::Int = round(Int, Base.Sys.total_memory() // 2^20)
+        work_memory::Int = max(1024, min(1024 * 8, div(available_memory, 3)))
+        tree_limit::Int = max(1024 * 2, max(work_memory, div(9 * available_memory, 10)))
+        @debug "There $(available_memory == 1 ? "is" : "are") $available_memory MiB available. Limiting work memory to $work_memory MiB, and setting tree limit to $tree_limit MiB."
+        #set_optimizer_attribute(model, "CPX_PARAM_NODEFILEIND", 3)
+        set_optimizer_attribute(model, "CPX_PARAM_TRELIM", tree_limit)
+        set_optimizer_attribute(model, "CPX_PARAM_WORKMEM", work_memory)
     end
     generate_time::Float64 = 0
     @debug "Generating common variables."
