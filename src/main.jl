@@ -67,7 +67,7 @@ function parse_cmdargs()
         "--no-print-models"
             help = "Do not print the models in debug mode."
             action = :store_true
-        "--table-style"
+        "--table-style", "--table-format"
             help = "Choose table style. (Allowed values: [\"text\", \"html\", \"latex\"])"
             default = "text"
             arg_type = String

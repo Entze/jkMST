@@ -347,7 +347,11 @@ function kMSTs!(;
             data[rowot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl), colot(Opt, f=f, k=k, ks=kl, ms=ml, sols=sl)] = o
         end
     end
-    pretty_table(data, header=header, backend=Val(tablebackend))
+    if tablebackend == :html
+        pretty_table(data, header=header, backend=Val(tablebackend))
+    else
+        pretty_table(data, header=header, backend=Val(tablebackend), body_hlines=Int[4 * i for i in 1:(fl*kl)])
+    end
 end
 
 struct KMSTSolutionReport
