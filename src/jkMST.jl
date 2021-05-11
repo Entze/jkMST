@@ -648,7 +648,7 @@ function generate_model(graph::SimpleWeightedGraph,
     generate_time += @elapsed begin
     @debug "Generating $mode variables."
     if mode == mtz
-        miller_tuckin_zemlin!(model, graph, k)
+        miller_tucker_zemlin(model, graph, k)
     elseif mode == scf
         single_commodity_flow!(model, graph, k)
     elseif mode == mcf
@@ -664,13 +664,13 @@ end
 function warmstart_model!(model, graph::SimpleWeightedGraph, mode::SolvingMode, k::Int, solution::Vector{Edge{Int}})
     basic_kmst_warmstart!(model, graph, k, solution)
     if mode == mtz
-        miller_tuckin_zemlin_warmstart!(model, graph, k, solution)
+        miller_tucker_zemlin_warmstart(model, graph, k, solution)
     end
 
     filled = check_kmst_warmstart!(model, graph, k)
 
     if mode == mtz
-        filled += check_miller_tuckin_zemlin_warmstart!(model, graph, k)
+        filled += check_miller_tucker_zemlin_warmstart(model, graph, k)
     end
 
     @debug "Found $filled variable$(filled == 1 ? "" : "s") that could be filled."

@@ -2,7 +2,7 @@
 using JuMP
 using LightGraphs, SimpleWeightedGraphs
 
-function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
+function miller_tucker_zemlin(model, graph :: SimpleWeightedGraph, k :: Int)
     n::Int = nv(graph)
     @variables(model, begin
         u[1:n], (integer=true, upper_bound = k+1)
@@ -10,39 +10,39 @@ function miller_tuckin_zemlin!(model, graph :: SimpleWeightedGraph, k :: Int)
         z[2:n], (binary=true, lower_bound = 0, upper_bound = 1)
     end)
     omega :: Int = 1
-    fix(u[omega], 0, force=true)
+    fix(u[omega], 0, force=true) # Constraint (6)
     for i in (omega+1):n
         set_lower_bound(u[i], 1)
         for j in 1:n
             if has_edge(graph, i, j)
-                y_ij = variable_by_name(model, "y[$i,$j]")
+                y_ij = variable_by_name(model, "y[$i,$j]") 
                 @constraint(model,
-                    u[i] >= u[j] + y_ij - k * (1 - y_ij)
+                    u[i] >= u[j] + y_ij - k * (1 - y_ij) # Constraint (7)
                 )
             end
         end
     end
 
     for i in (omega+1):n
-        @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j = 1:n if has_edge(graph, i, j)) == 1)
+        @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j = 1:n if has_edge(graph, i, j)) == 1) # Constraint (8)
     end
-    @constraint(model, sum(variable_by_name(model, "y[$omega,$j]") for j = (omega + 1):n) == 0)
+    @costraint(model, sum(variable_by_name(model, "y[$omega,$j]") for j = (omega + 1):n) == 0) # Constraint (9)
 
     for j in (omega+1):n
         @constraint(model,
             sum(variable_by_name(model, "y[$i,$j]") for i in 2:n if has_edge(graph, i, j)) 
-            + sum(variable_by_name(model, "y[$j,$k_]") for k_ in 2:n if has_edge(graph, j, k_)) == d[j])
+            + sum(variable_by_name(model, "y[$j,$k_]") for k_ in 2:n if has_edge(graph, j, k_)) == d[j]) # Constraint (10)
         @constraints(model, begin
-            z[j] * k >= d[j]
-            z[j] <= d[j]
+            z[j] * k >= d[j] # Constraint (11)
+            z[j] <= d[j] # Constraint (12)
         end)
     end
 
-    @constraint(model, sum(z[i] for i = 2:n) == k)
+    @constraint(model, sum(z[i] for i = 2:n) == k) # Constraint (13)
 
 end
 
-function miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, solution)
+function miller_tucker_zemlin_warmstart(model, graph :: SimpleWeightedGraph, k :: Int, solution)
     n :: Int = nv(graph)
     z :: Vector{Int} = zeros(Int, n)
     d :: Vector{Int} = zeros(Int, n)
@@ -97,7 +97,7 @@ function miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k 
     end
 end
 
-function check_miller_tuckin_zemlin_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int) :: Int
+function check_miller_tucker_zemlin_warmstart(model, graph :: SimpleWeightedGraph, k :: Int) :: Int
     n :: Int = nv(graph)
     m :: Int = ne(graph)
     es :: Vector{SimpleWeightedEdge} = collect(edges(graph))
