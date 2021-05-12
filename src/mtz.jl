@@ -26,7 +26,7 @@ function miller_tucker_zemlin(model, graph :: SimpleWeightedGraph, k :: Int)
     for i in (omega+1):n
         @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j = 1:n if has_edge(graph, i, j)) == 1) # Constraint (8)
     end
-    @costraint(model, sum(variable_by_name(model, "y[$omega,$j]") for j = (omega + 1):n) == 0) # Constraint (9)
+    @constraint(model, sum(variable_by_name(model, "y[$omega,$j]") for j = (omega + 1):n) == 0) # Constraint (9)
 
     for j in (omega+1):n
         @constraint(model,

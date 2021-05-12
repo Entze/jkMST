@@ -65,12 +65,12 @@ function multi_commodity_flow!(model,
     for i in 2:n
         if has_edge(graph, i, alpha)
             generate_time += @elapsed begin
-                fix(variable_by_name(model, "y[$i,$alpha]"), 0, force=true)
+                fix(variable_by_name(model, "y[$i,$alpha]"), 0, force=true) # Constraint (24)
             end
             next!(progress)
             for m in 2:n
                 generate_time += @elapsed begin
-                    fix(f[m, i, alpha], 0, force=true)
+                    fix(f[m, i, alpha], 0, force=true) # Constraint (25)
                 end
                 next!(progress)
                 if (generate_timeout_sec != Inf64 && generate_time > generate_timeout_sec) || (Base.Sys.free_memory()//total_memory <= memory_limit_ratio)
@@ -84,18 +84,18 @@ function multi_commodity_flow!(model,
 
 
     #@constraint(model, source_flow, sum(sum(f[m, alpha, j] for j in 2:n if has_edge(graph, alpha, j)) for m in 2:n) == k)
-    generate_time += @elapsed @constraint(model, one_real_root, sum(variable_by_name(model, "y[$alpha,$j]") for j in 2:n if has_edge(graph, alpha, j)) == 1)
+    generate_time += @elapsed @constraint(model, one_real_root, sum(variable_by_name(model, "y[$alpha,$j]") for j in 2:n if has_edge(graph, alpha, j)) == 1) # Constraint (26)
     next!(progress)
     for e in es
         i :: Int = src(e)
         j :: Int = dst(e)
         for m in 2:n
             generate_time += @elapsed begin
-                @constraint(model, f[m, i, j] <= variable_by_name(model, "y[$i,$j]"))
+                @constraint(model, f[m, i, j] <= variable_by_name(model, "y[$i,$j]")) # Constraint (27)
             end
             next!(progress)
             generate_time += @elapsed begin
-                @constraint(model, f[m, j, i] <= variable_by_name(model, "y[$j,$i]"))
+                @constraint(model, f[m, j, i] <= variable_by_name(model, "y[$j,$i]")) # Constraint (27)
             end
             next!(progress)
             if (generate_timeout_sec != Inf64 && generate_time > generate_timeout_sec) || (Base.Sys.free_memory()//total_memory <= memory_limit_ratio)
@@ -107,7 +107,7 @@ function multi_commodity_flow!(model,
     for m in 2:n
         generate_time += @elapsed begin
             @constraint(model, sum(f[m, i, m] for i in 1:n if has_edge(graph, i, m))
-                            - sum(f[m, m, j] for j in 2:n if has_edge(graph, m, j)) == z[m])
+                            - sum(f[m, m, j] for j in 2:n if has_edge(graph, m, j)) == z[m]) # Constraint (28)
         end
         next!(progress)
         if (generate_timeout_sec != Inf64 && generate_time > generate_timeout_sec) || (Base.Sys.free_memory()//total_memory <= memory_limit_ratio)
@@ -115,7 +115,7 @@ function multi_commodity_flow!(model,
             return
         end
         generate_time += @elapsed begin
-            @constraint(model, sum(f[m, alpha, j] for j in 2:n if has_edge(graph, alpha, j)) == z[m])
+            @constraint(model, sum(f[m, alpha, j] for j in 2:n if has_edge(graph, alpha, j)) == z[m]) # Constraint (29)
         end
         next!(progress)
         if (generate_timeout_sec != Inf64 && generate_time > generate_timeout_sec) || (Base.Sys.free_memory()//total_memory <= memory_limit_ratio)
@@ -126,7 +126,7 @@ function multi_commodity_flow!(model,
             if m != v
                 generate_time += @elapsed begin 
                     @constraint(model, sum(f[m, i, v] for i in 1:n if has_edge(graph, i, v))
-                                    - sum(f[m, v, j] for j in 2:n if has_edge(graph, v, j)) == 0)
+                                    - sum(f[m, v, j] for j in 2:n if has_edge(graph, v, j)) == 0) # Constraint (30)
                 end
                 next!(progress)
             end
@@ -137,7 +137,7 @@ function multi_commodity_flow!(model,
         end
     end
 
-    @constraint(model, treesize, sum(z[i] for i in 2:n) == k)
+    @constraint(model, treesize, sum(z[i] for i in 2:n) == k) # Constraint (31)
     next!(progress)
     finish!(progress)
 end
