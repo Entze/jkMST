@@ -36,11 +36,13 @@ The most common command to run will be:
 
 ```bash
 ./jkMST --directory data # finds all .dat files in all subdirectories
-    --mode mtz scf mcf # launches every instance in every mode
+    --mode mtz scf mcf # the modes used in this run
     --size 0.2 0.5 # relative sizes of the k-MST tree
     --timeout 600 # 10 minute runtime in seconds
     --generate-timeout 60 # 1 minute time for building the model
 ```
+
+Notice that the `-m` or `--mode`, `-k` or `--size`, `-s` or `--solver` flags are in a crossproduct, i.e. all possible configurations are run.
 
 The flag `--verbose` outputs quite a bit of additional information which might be interesting.
 
