@@ -1,4 +1,3 @@
-
 const time_names_table = ["ns", "µs", "ms", "s", "m", "h", "d", "y"]
 const time_step_table =     [1000, 1000, 1000, 60,  60,  24, 365]
 
@@ -62,7 +61,7 @@ function format_ratio_readable(amount::Union{Int, Float64}, max::Union{Int, Floa
     if 1//5 <= perc
         return "$(fmt(fspec, perc))‰"
     end
-    
+
     perc *= 100
 
     if 1//5 <= perc
