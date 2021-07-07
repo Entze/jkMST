@@ -65,7 +65,7 @@ function dcc_lazy_clause_generator(model, graph::SimpleWeightedGraph, k::Int)
             filter!(v -> !(v in cutset), complement)
             @assert length(complement) + length(cutset) == nv(graph) "Not all nodes in cutset and complement"
             filter!(v -> v != 1, cutset)
-            constraint = @build_constraint(sum(y[i,j] for i in cutset for j in complement if has_edge(graph, i, j)) >= sum(y[1, i] for i in cutset))
+            constraint = @build_constraint(sum(y[i,j] for i in cutset for j in complement if has_edge(graph, i, j)) >= sum(y[1, i] for i in cutset)) # Constraint 39
             global lazy_dcc_constraints += 1
             MOI.submit(model, MOI.LazyConstraint(cb_data), constraint)
         end

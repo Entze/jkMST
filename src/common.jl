@@ -52,14 +52,13 @@ function basic_kmst!(model,
         e = es[i]
         s = src(e)
         d = dst(e)
-        @constraint(model, y[s, d] + y[d, s] == x[i]) # Constraint (2)
+        @constraint(model, y[s, d] + y[d, s] == x[i]) # Constraint 2
         next!(progress)
     end
 
     @constraints(model, begin
-        # sum(y[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # Constraint (3)
-        sum(x[i] for i in 1:m if src(es[i]) != 1 && dst(es[i]) != 1) == k-1 # Constraint (4)
-        sum(x[e] * Int(round(Int, weight(es[e]))) for e in 1:m) == o # Constraint (5)
+        sum(x[i] for i in 1:m if src(es[i]) != 1 && dst(es[i]) != 1) == k-1 # Constraint 3
+        sum(x[e] * Int(round(Int, weight(es[e]))) for e in 1:m) == o # Constraint 4
     end)
     ProgressMeter.update!(progress, 3)
     @objective(model, Min, o)

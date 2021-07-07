@@ -10,21 +10,20 @@ function cycle_elimination_constraints!(
     k::Int)
 
     global lazy_cec_constraints = 0
-    @constraint(model, sum(variable_by_name(model, "y[1,$j]") for j in 2:nv(graph)) == 1)
-    @constraint(model, sum(variable_by_name(model, "y[$j,1]") for j in 2:nv(graph)) >= 1)
-    @constraint(model, sum(variable_by_name(model, "y[$j,1]") for j in 2:nv(graph)) <= k-1)
+    @constraint(model, sum(variable_by_name(model, "y[1,$j]") for j in 2:nv(graph)) == 1) # Constraint 32
+    @constraint(model, sum(variable_by_name(model, "y[$j,1]") for j in 2:nv(graph)) >= 1) # Constraint 33
+    @constraint(model, sum(variable_by_name(model, "y[$j,1]") for j in 2:nv(graph)) <= k-1) # Constraint 34
     for i in 2:nv(graph)
         @constraint(model, sum(variable_by_name(model, "y[$i,$j]")
                                for j in 1:nv(graph) if has_edge(graph, i, j))
                     >= sum(variable_by_name(model, "y[$j,$i]")
-                           for j in 1:nv(graph) if has_edge(graph, j, i)))
+                           for j in 1:nv(graph) if has_edge(graph, j, i))) # Constraint 35
 
         @constraint(model, sum(variable_by_name(model, "y[$i,$j]")
                                for j in 1:nv(graph) if has_edge(graph, i, j))
                     <= sum(variable_by_name(model, "y[$j,$i]")
-                           for j in 1:nv(graph) if has_edge(graph, j, i)) * (k-1))
-        # @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j in 1:nv(graph) if has_edge(graph, i, j)) <= k-1)
-        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 1:nv(graph) if has_edge(graph, j, i)) <= 1)
+                           for j in 1:nv(graph) if has_edge(graph, j, i)) * (k-1)) # Constraint 36
+        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 1:nv(graph) if has_edge(graph, j, i)) <= 1) # Constraint 37
     end
 
     MOI.set(model,
@@ -66,7 +65,7 @@ function cec_lazy_clause_generator(model, graph::SimpleWeightedGraph, k::Int)
                                                     for i in cycle
                                                         for j in cycle
                                                             if has_edge(graph, i, j))
-                                               <= cyclelength - 1)
+                                               <= cyclelength - 1) # Constraint 38
 
                 # for debugging:
                 # arcs::Vector{String} = Vector{String}()
