@@ -645,6 +645,7 @@ function generate_model(graph::SimpleWeightedGraph,
         #set_optimizer_attribute(model, "CPX_PARAM_NODEFILEIND", 3)
         set_optimizer_attribute(model, "CPX_PARAM_TRELIM", tree_limit)
         set_optimizer_attribute(model, "CPX_PARAM_WORKMEM", work_memory)
+        set_optimizer_attribute(model, "CPX_PARAM_THREADS", 1)
     end
     generate_time::Float64 = 0
     @debug "Generating common variables."

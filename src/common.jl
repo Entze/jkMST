@@ -57,7 +57,7 @@ function basic_kmst!(model,
     end
 
     @constraints(model, begin
-        #sum(y[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # Constraint (3)
+        # sum(y[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # Constraint (3)
         sum(x[i] for i in 1:m if src(es[i]) != 1 && dst(es[i]) != 1) == k-1 # Constraint (4)
         sum(x[e] * Int(round(Int, weight(es[e]))) for e in 1:m) == o # Constraint (5)
     end)
@@ -65,6 +65,7 @@ function basic_kmst!(model,
     @objective(model, Min, o)
     next!(progress)
     finish!(progress)
+    #MOI.set(model, MOI.HeuristicCallback(), heuristic!(model, graph, k))
 end
 
 function basic_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int, solution :: Vector{Edge{Int}})
@@ -147,19 +148,117 @@ end
 function heuristic!(model,
                     graph :: SimpleWeightedGraph,
                     k :: Int)
-    variables::Vector{VariableRef} = Vector{VariableRef}()
-    values::Vector{Float64} = Vector{Float64}()
     y::Dict{Tuple{Int, Int}, VariableRef} = Dict{Tuple{Int, Int}, VariableRef}()
     y_val::Dict{Tuple{Int, Int}, Float64} = Dict{Tuple{Int, Int}, Float64}()
     x::Dict{Int, VariableRef} = Dict{Int, VariableRef}()
     x_val::Dict{Int, Float64} = Dict{Int, Float64}()
-    o::VariableRef = undef
-    o_val::Int = 0
-    es = sort(edges(graph))
+    o::VariableRef = variable_by_name(model, "o")
+    o_val::Float64 = 0
+    es = collect(edges(graph))
+    sort!(es, by=dst)
+    sort!(es, by=src, alg=MergeSort)
+    r::Int = 0
+    for e in es
+        r += 1
+        x[r] = variable_by_name(model, "x[$r]")
+        i::Int = src(e)
+        j::Int = dst(e)
+        y[i,j] = variable_by_name(model, "y[$i,$j]")
+        y[j,i] = variable_by_name(model, "y[$j,$i]")
+    end
     return function(cb_data)
+        variables::Vector{VariableRef} = Vector{VariableRef}()
+        values::Vector{Float64} = Vector{Float64}()
+        status = callback_node_status(cb_data, model)
+        o_val = callback_value(cb_data, o)
+        for ((i,j), v) in y
+            y_val[i,j] = callback_value(cb_data, v)
+        end
+        for (k, v) in x
+            x_val[k] = callback_value(cb_data, v)
+        end
+        if status == MOI.CALLBACK_NODE_STATUS_FRACTIONAL
+            @debug "Found fractional solution. Attempting to round."
+            arcs::Vector{Tuple{Int,Int,Int}} = Vector{Tuple{Int,Int,Int}}()
+            r = 0
+            for e in es
+                r += 1
+                i::Int = src(e)
+                j::Int = dst(e)
+                push!(arcs, (r,i,j))
+                push!(arcs, (r,j,i))
+            end
 
+            sort!(arcs, by=(a -> a[3]))
+            sort!(arcs, by=(a -> a[2]), alg=MergeSort)
+            sort!(arcs, by=(a -> weight(es[a[1]])), alg=MergeSort)
+            sort!(arcs, by=(a -> y_val[a[2],a[3]]), alg=MergeSort, rev=true)
+            sort!(arcs, by=(a -> a[2] == 1 || a[3] == 1), alg=MergeSort)
+
+            visited::Vector{Bool} = zeros(Bool, nv(graph))
+            parents::Vector{Int} = zeros(Int, nv(graph))
+            lastnode::Int = 1
+            treesize::Int = 1
+            visited[1] = true
+            parents[1] = -1
+
+            includededges::Vector{Bool} = zeros(Bool, length(es))
+
+            while treesize < k+1
+                for (r,i,j) in arcs
+                    (visited[i] && !visited[j]) || continue
+                    visited[j] = true
+                    includededges[r] = true
+                    parents[i] = lastnode
+                    parents[j] = i
+                    lastnode = j
+                    treesize += 1
+                    @debug "Including $r ($i -> $j)"
+                    break
+                end
+                filter!(v -> !visited[v[3]], arcs)
+            end
+            @assert count(visited) == k+1 "Tree should have size $k, but has size $(count(visited))."
+
+            push!(variables, o)
+            push!(values, 0.0)
+
+            r = 0
+            for e in es
+                r += 1
+                if includededges[r]
+                    values[1] += round(weight(e))
+                    push!(variables, x[r])
+                    push!(values, 1.0)
+                end
+            end
+
+            # for ((i,j),v) in y
+            #    push!(variables, v)
+            #    push!(values, Float64(visited[i] && visited[j] && (parents[j] == i || parents[i] == j)))
+            # end
+
+            status = MOI.submit(model, MOI.HeuristicSolution(cb_data), variables, values)
+
+            debugstring = "Found solution with weight $(round(Int, values[1])), "
+            if status == MOI.HEURISTIC_SOLUTION_ACCEPTED
+                debugstring *= string(GREEN_FG("accepted"))
+            elseif status == MOI.HEURISTIC_SOLUTION_REJECTED
+                debugstring *= string(RED_FG("rejected"))
+            else
+                @assert status == MOI.HEURISTIC_SOLUTION_UNKNOWN
+                debugstring *= string(YELLOW_FG("unknown status"))
+            end
+            @debug debugstring * "."
+
+        elseif status == MOI.CALLBACK_NODE_STATUS_INTEGER
+            @debug "Found integer solution. Attempting to permute."
+        else
+            @assert status == MOI.CALLBACK_NODE_STATUS_UNKNOWN
+        end
     end
 end
+
 
 struct KMSTSolution
     termination_status :: MOI.TerminationStatusCode

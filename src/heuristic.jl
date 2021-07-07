@@ -1,4 +1,3 @@
-
 using DataStructures
 using LightGraphs, SimpleWeightedGraphs
 
@@ -136,7 +135,7 @@ function kruskal_heuristic(graph::SimpleWeightedGraph, k::Int; unskippable::Unio
 
 
     for e::SimpleWeightedEdge in Iterators.drop(es, n-1)
-        treesize < (k-1) || break  
+        treesize < (k-1) || break
 
         s = src(e)
         d = dst(e)
