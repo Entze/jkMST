@@ -1,4 +1,3 @@
-
 using Logging
 using JuMP, CPLEX
 using LightGraphs, SimpleWeightedGraphs
@@ -45,7 +44,7 @@ function basic_kmst!(model,
         j::Int = dst(e)
         y[i,j] = @variable(model, base_name="y[$i,$j]", binary=true, lower_bound=0, upper_bound=1) # Set bounds, that solver doesn't have to set it implicitly
         next!(progress)
-        y[j,i] = @variable(model, base_name="y[$j,$i]", binary=true, lower_bound=0, upper_bound=1) 
+        y[j,i] = @variable(model, base_name="y[$j,$i]", binary=true, lower_bound=0, upper_bound=1)
         next!(progress)
     end
 
@@ -152,6 +151,7 @@ struct KMSTSolution
     relative_gap :: Float64
     solve_time_sec :: Float64
     bnb_nodes :: Union{Int, Nothing}
+    violated_ineq :: Union{Int, Nothing}
 end
 
 function print_variable_table(model, graph :: SimpleWeightedGraph)
@@ -227,32 +227,44 @@ function print_variable_table(model, graph :: SimpleWeightedGraph)
             data[onevarslines, 2] = value(var)
             onevarslines += 1
         elseif delim > 1
-            basename::String = name[1:(delim-1)]
-            @assert basename in keys(multidimvarslines) "Basename $basename never seen before. Not found in multidimvarslines."
-            dims::String = name[delim:end]
-            @assert basename in names "Basename $basename never seen before. Not found in names."
-            index::Int = filter(v -> v[2] == basename, collect(enumerate(names)))[1][1]
-            @assert 1 <= index * 2 + 1 <= width "$basename index ($index) exceeds width."
-            @assert 1 <= multidimvarslines[basename] <= height "$name exceeds height."
+            if round(value(var)) != 0
+                basename::String = name[1:(delim-1)]
+                @assert basename in keys(multidimvarslines) "Basename $basename never seen before. Not found in multidimvarslines."
+                dims::String = name[delim:end]
+                @assert basename in names "Basename $basename never seen before. Not found in names."
+                index::Int = filter(v -> v[2] == basename, collect(enumerate(names)))[1][1]
+                @assert 1 <= index * 2 + 1 <= width "$basename index ($index) exceeds width."
+                @assert 1 <= multidimvarslines[basename] <= height "$name exceeds height."
                 data[multidimvarslines[basename], index * 2 + 1] = dims
-            if basename == "x"
-                e = es[parse(Int, dims[2:(end-1)])]
-                data[multidimvarslines[basename], index * 2 + 1] *= " = [$(src(e)),$(dst(e))]"
+                if basename == "x"
+                    e = es[parse(Int, dims[2:(end-1)])]
+                    data[multidimvarslines[basename], index * 2 + 1] *= " = [$(src(e)),$(dst(e))]"
+                end
+                data[multidimvarslines[basename], index * 2 + 2] = value(var)
+                multidimvarslines[basename] += 1
             end
-            data[multidimvarslines[basename], index * 2 + 2] = value(var)
-            multidimvarslines[basename] += 1
         end
     end
 
+    if !isempty(multidimvarslines)
+        multilines = maximum(values(multidimvarslines))
+    end
+    height = max(onevarslines, multilines)
+
+    data_view = view(data, 1:(height-1), :)
+
     if height > 45
-        pretty_table(data, header=header, backend=Val(:html))
+        pretty_table(data_view, header=header, backend=Val(:html))
     else
-        pretty_table(data, header=header)
+        pretty_table(data_view, header=header)
     end
 
 end
 
-function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
+function solve!(model,
+                graph :: SimpleWeightedGraph,
+                k :: Int,
+                mode :: SolvingMode) :: KMSTSolution
     ts :: MOI.TerminationStatusCode = MOI.INTERRUPTED
     @debug "Starting to optimize."
     optimizationtime = @elapsed optimize!(model)
@@ -271,35 +283,35 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
         elseif ts == MOI.MEMORY_LIMIT
             warning *= " Memory limit reached."
         else
-            if ts == MOI.INFEASIBLE
-                if lowercase(solver_name(model)) != "cplex"
-                    @debug "Setting optimizer from $(solver_name(model)) to CPLEX."
-                    set_optimizer(model, CPLEX.Optimizer)
-                end
-                compute_conflict!(model)
-            
-                constraint_types::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
+           if ts == MOI.INFEASIBLE && mode != cec && mode != dcc
+              if lowercase(solver_name(model)) != "cplex"
+                  @debug "Setting optimizer from $(solver_name(model)) to CPLEX."
+                  set_optimizer(model, CPLEX.Optimizer)
+              end
+              compute_conflict!(model)
 
-                debugstring::String = "Following constraints are part of the conflict:"
-            
-                for (ref, typ) in constraint_types
-                    !(ref == VariableRef && typ == MOI.Integer) || continue
-                    !(ref == VariableRef && typ == MOI.ZeroOne) || continue
-                    !(ref == GenericAffExpr{Float64, VariableRef} && typ == MOI.Interval{Float64}) || continue
-                    all_cons::Vector{ConstraintRef} = all_constraints(model, ref, typ)
-                    @debug "$ref: $typ"
-                    for con in all_cons
-                        if MOI.get(model.moi_backend, MOI.ConstraintConflictStatus(), con.index) != MOI.NOT_IN_CONFLICT
-                            debugstring *= "\n$con"
-                        end
-                    end
-                end
-                warning *= " Problem is infeasible."
-                @debug debugstring
-            else
-                warning *= " $ts"
-            end
-            print_variable_table(model, graph)
+              constraint_types::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
+
+              debugstring::String = "Following constraints are part of the conflict:"
+
+              for (ref, typ) in constraint_types
+                  !(ref == VariableRef && typ == MOI.Integer) || continue
+                  !(ref == VariableRef && typ == MOI.ZeroOne) || continue
+                  !(ref == GenericAffExpr{Float64, VariableRef} && typ == MOI.Interval{Float64}) || continue
+                  all_cons::Vector{ConstraintRef} = all_constraints(model, ref, typ)
+                  @debug "$ref: $typ"
+                  for con in all_cons
+                      if MOI.get(model.moi_backend, MOI.ConstraintConflictStatus(), con.index) != MOI.NOT_IN_CONFLICT
+                          debugstring *= "\n$con"
+                      end
+                  end
+              end
+              warning *= " Problem is infeasible."
+              @debug debugstring
+          else
+              warning *= " $ts"
+          end
+          print_variable_table(model, graph)
         end
         @warn warning
     end
@@ -308,9 +320,14 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     if lowercase(solver_name(model)) == "cplex"
         bnbn = node_count(model)
     end
-    if !has_values(model)
-        return KMSTSolution(ts, nothing, Inf64, Inf64, st, bnbn)
+    lc::Union{Nothing, Int} = nothing
+    if mode == cec
+        lc = lazy_cec_constraints
     end
+    if !has_values(model)
+        return KMSTSolution(ts, nothing, Inf64, Inf64, st, bnbn, lc)
+    end
+
     rg::Float64 = relative_gap(model)
     n::Int = nv(graph)
     solution_graph::SimpleWeightedGraph = get_solution_graph(model, graph)
@@ -344,7 +361,7 @@ function solve!(model, graph :: SimpleWeightedGraph, k :: Int) :: KMSTSolution
     if bug
         print_variable_table(model, graph)
     end
-    return KMSTSolution(ts, solution_graph, ov, rg, st, bnbn)
+    return KMSTSolution(ts, solution_graph, ov, rg, st, bnbn, lc)
 end
 
 function get_solution_graph(model, graph :: SimpleWeightedGraph)
@@ -372,6 +389,6 @@ function get_solution_graph(model, graph :: SimpleWeightedGraph)
             end
         end
     end
-    
+
     return solution_graph
 end

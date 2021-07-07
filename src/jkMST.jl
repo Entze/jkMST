@@ -1,4 +1,3 @@
-
 using Logging
 using Crayons.Box
 using LightGraphs, SimpleWeightedGraphs
@@ -14,6 +13,7 @@ include("util.jl")
 include("mtz.jl")
 include("scf.jl")
 include("mcf.jl")
+include("cec.jl")
 
 @enum HeaderName Filename Graphsize Treesize Opt Sol
 
@@ -377,7 +377,7 @@ function kMST(graph :: SimpleWeightedGraph,
     debugmodels::Bool=true) :: KMSTSolutionReport
     n::Int = nv(graph) - 1
     prelude_time::Float64 = 0
-    prelude_time += @elapsed begin 
+    prelude_time += @elapsed begin
         model = generate_model(graph, mode, k, solver, timeout_sec=timeout_sec, generate_timeout_sec=generate_timeout_sec, lowerbound=lowerbound, upperbound=upperbound,debugmodels=debugmodels)
     end
     if generate_timeout_sec != Inf64 && prelude_time > generate_timeout_sec
@@ -400,7 +400,7 @@ function kMST(graph :: SimpleWeightedGraph,
             onlylowerbound::Int = count(v -> !is_fixed(v) && !has_upper_bound(v) && has_lower_bound(v), all_vars)
             @debug "Model has $bound ($(format_ratio_readable(bound,nvars))) bound variable$(bound == 1 ? "" : "s" ), $free ($(format_ratio_readable(free, nvars))) free variable$(free == 1 ? "" : "s"), $onlylowerbound ($(format_ratio_readable(onlylowerbound, nvars))) variable$(onlylowerbound == 1 ? "" : "s") with no upperbound, $onlyupperbound ($(format_ratio_readable(onlyupperbound, nvars))) variable$(onlyupperbound == 1 ? "" : "s") with no lowerbound."
         end
-        
+
         constypes::Vector{Tuple{DataType, DataType}} = list_of_constraint_types(model)
         ncons::Int = 0
         debugstring::String = ""
@@ -443,7 +443,7 @@ function kMST(graph :: SimpleWeightedGraph,
         return KMSTSolutionReport(MOI.MEMORY_LIMIT, upperbound, 1-(lowerbound/upperbound), prelude_time, 0, nothing)
     end
 
-    kmstsolution = solve!(model, graph, k)
+    kmstsolution = solve!(model, graph, k, mode)
     if printsolutiongraphs && !isnothing(kmstsolution.solution_graph)
         print_weighted_graph(kmstsolution.solution_graph)
     end
@@ -455,7 +455,13 @@ function kMST(graph :: SimpleWeightedGraph,
         objective_value = Int(round(Int, objective_value))
     end
 
-    return KMSTSolutionReport(kmstsolution.termination_status, objective_value, kmstsolution.relative_gap, kmstsolution.solve_time_sec, kmstsolution.bnb_nodes, nothing)
+    return KMSTSolutionReport(
+        kmstsolution.termination_status,
+        objective_value,
+        kmstsolution.relative_gap,
+        kmstsolution.solve_time_sec,
+        kmstsolution.bnb_nodes,
+        kmstsolution.violated_ineq)
 end
 
 function preprocess(graph::SimpleWeightedGraph, k::Int, timeout_sec::Float64=Inf64) :: Tuple{Vector{Edge{Int}}, Int, Int}
@@ -630,7 +636,7 @@ function generate_model(graph::SimpleWeightedGraph,
         end
         set_time_limit_sec(model, timeout)
     end
-    if solver == cplex 
+    if solver == cplex
         available_memory::Int = round(Int, Base.Sys.total_memory() // 2^20)
         work_memory::Int = max(1024, min(1024 * 8, div(available_memory, 3)))
         tree_limit::Int = max(1024 * 2, max(work_memory, div(9 * available_memory, 10)))
@@ -653,6 +659,8 @@ function generate_model(graph::SimpleWeightedGraph,
         single_commodity_flow!(model, graph, k)
     elseif mode == mcf
         multi_commodity_flow!(model, graph, k, generate_timeout_sec=generate_timeout_sec-generate_time, isdebug=isdebug())
+    elseif mode == cec
+        cycle_elimination_constraints!(model, graph, k)
     end
     end
     if debugmodels && generate_time < generate_timeout_sec + 1.0
@@ -735,10 +743,8 @@ function read_file_as_simplegraph(path::String)
     @debug ("Read $(string(YELLOW_FG(string(totallines)))) line$(linesplural) in $(string(BLUE_FG(format_seconds_readable(totaltime, 1)))) at $(string(CYAN_FG(format_seconds_readable(totaltime / totallines, 2)))) per line")
     es = ne(graph)
     if es != edgesize
-        @warn "Input file claims $edgesize edge$(edgesize == 1 ? "" : "s") but got $es:" 
+        @warn "Input file claims $edgesize edge$(edgesize == 1 ? "" : "s") but got $es:"
         print_weighted_graph(graph, nothing, nv(graph), es)
     end
     return graph
 end
-
-
