@@ -14,6 +14,7 @@ include("mtz.jl")
 include("scf.jl")
 include("mcf.jl")
 include("cec.jl")
+include("dcc.jl")
 
 @enum HeaderName Filename Graphsize Treesize Opt Sol
 
@@ -661,6 +662,8 @@ function generate_model(graph::SimpleWeightedGraph,
         multi_commodity_flow!(model, graph, k, generate_timeout_sec=generate_timeout_sec-generate_time, isdebug=isdebug())
     elseif mode == cec
         cycle_elimination_constraints!(model, graph, k)
+    elseif mode == dcc
+        directed_cutset_constraints!(model, graph, k)
     end
     end
     if debugmodels && generate_time < generate_timeout_sec + 1.0

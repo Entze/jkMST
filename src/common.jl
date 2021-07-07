@@ -57,7 +57,7 @@ function basic_kmst!(model,
     end
 
     @constraints(model, begin
-        sum(y[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # Constraint (3)
+        #sum(y[i,j] for i = 2:n for j=2:n if has_edge(graph, i ,j)) == k-1 # Constraint (3)
         sum(x[i] for i in 1:m if src(es[i]) != 1 && dst(es[i]) != 1) == k-1 # Constraint (4)
         sum(x[e] * Int(round(Int, weight(es[e]))) for e in 1:m) == o # Constraint (5)
     end)
@@ -142,6 +142,23 @@ function check_kmst_warmstart!(model, graph :: SimpleWeightedGraph, k :: Int) ::
 
     return filled
 
+end
+
+function heuristic!(model,
+                    graph :: SimpleWeightedGraph,
+                    k :: Int)
+    variables::Vector{VariableRef} = Vector{VariableRef}()
+    values::Vector{Float64} = Vector{Float64}()
+    y::Dict{Tuple{Int, Int}, VariableRef} = Dict{Tuple{Int, Int}, VariableRef}()
+    y_val::Dict{Tuple{Int, Int}, Float64} = Dict{Tuple{Int, Int}, Float64}()
+    x::Dict{Int, VariableRef} = Dict{Int, VariableRef}()
+    x_val::Dict{Int, Float64} = Dict{Int, Float64}()
+    o::VariableRef = undef
+    o_val::Int = 0
+    es = sort(edges(graph))
+    return function(cb_data)
+
+    end
 end
 
 struct KMSTSolution
@@ -323,6 +340,9 @@ function solve!(model,
     lc::Union{Nothing, Int} = nothing
     if mode == cec
         lc = lazy_cec_constraints
+    end
+    if mode == dcc
+        lc = lazy_dcc_constraints
     end
     if !has_values(model)
         return KMSTSolution(ts, nothing, Inf64, Inf64, st, bnbn, lc)

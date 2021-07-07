@@ -23,8 +23,8 @@ function cycle_elimination_constraints!(
                                for j in 1:nv(graph) if has_edge(graph, i, j))
                     <= sum(variable_by_name(model, "y[$j,$i]")
                            for j in 1:nv(graph) if has_edge(graph, j, i)) * (k-1))
-        @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j in 1:nv(graph) if has_edge(graph, i,j)) <= k-1)
-        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 1:nv(graph) if has_edge(graph, i,j)) <= 1)
+        # @constraint(model, sum(variable_by_name(model, "y[$i,$j]") for j in 1:nv(graph) if has_edge(graph, i, j)) <= k-1)
+        @constraint(model, sum(variable_by_name(model, "y[$j,$i]") for j in 1:nv(graph) if has_edge(graph, j, i)) <= 1)
     end
 
     MOI.set(model,
@@ -36,14 +36,10 @@ function cec_lazy_clause_generator(model, graph::SimpleWeightedGraph, k::Int)
     es = collect(SimpleWeightedEdge, edges(graph))
     sort!(es, by=dst)
     sort!(es, by=src, alg=MergeSort)
-    x::Dict{Int,VariableRef} = Dict{Int,VariableRef}()
     y::Dict{Tuple{Int,Int},VariableRef} = Dict{Tuple{Int,Int},VariableRef}()
-    r::Int = 0
     for e in es
-        r += 1
         i::Int = src(e)
         j::Int = dst(e)
-        x[r] = variable_by_name(model, "x[$r]")
         y[i,j] = variable_by_name(model, "y[$i,$j]")
         y[j,i] = variable_by_name(model, "y[$j,$i]")
     end
@@ -56,9 +52,7 @@ function cec_lazy_clause_generator(model, graph::SimpleWeightedGraph, k::Int)
             @debug "Found integer solution"
             # x_val::Dict{Int, } = Dict{Int, Float64}()
             y_val::Dict{Tuple{Int,Int},Int} = Dict{Tuple{Int,Int},Int}()
-            r = 0
             for e in es
-                r += 1
                 i::Int = src(e)
                 j::Int = dst(e)
                 y_val[i,j] = round(callback_value(cb_data, y[i,j]))
